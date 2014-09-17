@@ -1,17 +1,14 @@
 module Main where
 
-import Control.Applicative
 import Control.Lens
-import Control.Monad (forever)
 import Data.Distributive (distribute)
+import Data.Function (fix)
 import Foreign (Ptr, alloca, castPtr, nullPtr, peek, sizeOf, with)
 import Foreign.C (CFloat, withCString)
-import Foreign.Marshal (alloca)
-import Foreign.Storable (peek, sizeOf)
 import Graphics.Rendering.OpenGL (($=))
 
-import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
+import qualified Data.Text.IO as Text
 import qualified Graphics.UI.SDL.Basic as SDL
 import qualified Graphics.UI.SDL.Video as SDL
 import qualified Graphics.Rendering.OpenGL as GL
@@ -19,7 +16,8 @@ import qualified Graphics.Rendering.OpenGL.Raw as GL
 import qualified Data.Vector.Storable as V
 
 import Linear as L
-import Linear ((!*!))
+
+import Paths_hadoom
 
 triangleTranslation :: Floating a => M44 a
 triangleTranslation = eye4 & translation .~ V3 0 0 (-5)
@@ -28,11 +26,10 @@ main :: IO ()
 main =
   alloca $ \winPtr ->
   alloca $ \rendererPtr -> do
-    SDL.init 0x00000020
-    SDL.createWindowAndRenderer 800 600 0 winPtr rendererPtr
+    _ <- SDL.init 0x00000020
+    _ <- SDL.createWindowAndRenderer 800 600 0 winPtr rendererPtr
 
     win <- peek winPtr
-    renderer <- peek rendererPtr
 
     withCString "Hadoom" $ SDL.setWindowTitle win
 
@@ -47,56 +44,58 @@ main =
     V.unsafeWith vertices $ \verticesPtr ->
       GL.bufferData GL.ArrayBuffer $= (fromIntegral (3 * 3 * sizeOf (0 :: CFloat)), verticesPtr, GL.StaticDraw)
 
-    let shaderAttribute = GL.AttribLocation 0
-    GL.vertexAttribPointer shaderAttribute $= (GL.ToFloat, GL.VertexArrayDescriptor 3 GL.Float 0 nullPtr)
-    GL.vertexAttribArray shaderAttribute $= GL.Enabled
+    GL.vertexAttribPointer positionAttribute $= (GL.ToFloat, GL.VertexArrayDescriptor 3 GL.Float 0 nullPtr)
+    GL.vertexAttribArray positionAttribute $= GL.Enabled
 
-    vertexShader <- GL.createShader GL.VertexShader
-    fragmentShader <- GL.createShader GL.FragmentShader
-    GL.shaderSourceBS vertexShader $= Text.encodeUtf8
-      (Text.pack $ unlines
-      [ "#version 130"
-      , "uniform mat4 projection;"
-      , "uniform mat4 model;"
-      , "in vec3 in_Position;"
-      , "void main(void) {"
-      , " gl_Position = projection * model * vec4(in_Position, 1.0);"
-      , "}"
-      ])
-    GL.shaderSourceBS fragmentShader $= Text.encodeUtf8
-      (Text.pack $ unlines
-      [ "#version 130"
-      , "out vec4 fragColor;"
-      , "void main(void) {"
-      , " fragColor = vec4(1.0,1.0,1.0,1.0);"
-      , "}"
-      ])
-    GL.compileShader vertexShader
-    GL.compileShader fragmentShader
-    shaderProg <- GL.createProgram
-    GL.attachShader shaderProg vertexShader
-    GL.attachShader shaderProg fragmentShader
-    GL.attribLocation shaderProg "in_Position" $= shaderAttribute
-    GL.linkProgram shaderProg
+    shaderProg <- createShaderProgram "shaders/vertex/projection-model.glsl" "shaders/fragment/solid-white.glsl"
     GL.currentProgram $= Just shaderProg
 
-    let fov = 90
-        s = recip (tan $ fov * 0.5 * pi / 180)
-        f = 1000
-        n = 1
-    let perspective = V.fromList [ s, 0, 0, 0
-                                 , 0, s, 0, 0
-                                 , 0, 0, -(f/(f - n)), -1
-                                 , 0, 0, -((f*n)/(f-n)), 1
-                                 ]
-    GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "projection")
-    V.unsafeWith perspective $ \ptr -> GL.glUniformMatrix4fv loc 1 0 ptr
+    let perspective =
+          let fov = 90
+              s = recip (tan $ fov * 0.5 * pi / 180)
+              far = 1000
+              near = 1
+          in V.fromList [ s, 0, 0, 0
+                        , 0, s, 0, 0
+                        , 0, 0, -(far/(far - near)), -1
+                        , 0, 0, -((far*near)/(far-near)), 1
+                        ]
 
-    forever $ do
-      GL.clearColor $= GL.Color4 0.5 0.2 1 1
-      GL.clear [GL.ColorBuffer]
-      GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "model")
-      with (distribute triangleTranslation) $ \ptr ->
-        GL.glUniformMatrix4fv loc 1 0 (castPtr (ptr :: Ptr (M44 CFloat)))
-      GL.drawArrays GL.Triangles 0 3
-      SDL.glSwapWindow win
+    V.unsafeWith perspective $ \ptr -> do
+      GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "projection")
+      GL.glUniformMatrix4fv loc 1 0 ptr
+
+    (fix $ \f n -> do
+       GL.clearColor $= GL.Color4 0.5 0.2 1 1
+       GL.clear [GL.ColorBuffer]
+       GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "model")
+       with (distribute (triangleTranslation !*! (eye4 & translation .~ V3 0 0 n))) $ \ptr ->
+         GL.glUniformMatrix4fv loc 1 0 (castPtr (ptr :: Ptr (M44 CFloat)))
+       GL.drawArrays GL.Triangles 0 3
+       SDL.glSwapWindow win
+       f (n + 0.001)) 0
+
+positionAttribute :: GL.AttribLocation
+positionAttribute = GL.AttribLocation 0
+
+createShaderProgram :: FilePath -> FilePath -> IO GL.Program
+createShaderProgram vertexShaderPath fragmentShaderPath = do
+  vertexShader <- GL.createShader GL.VertexShader
+  fragmentShader <- GL.createShader GL.FragmentShader
+
+  compileShader vertexShaderPath vertexShader
+  compileShader fragmentShaderPath fragmentShader
+
+  shaderProg <- GL.createProgram
+  GL.attachShader shaderProg vertexShader
+  GL.attachShader shaderProg fragmentShader
+  GL.attribLocation shaderProg "in_Position" $= positionAttribute
+  GL.linkProgram shaderProg
+
+  return shaderProg
+
+  where
+  compileShader path shader = do
+    src <- getDataFileName path >>= Text.readFile
+    GL.shaderSourceBS shader $= Text.encodeUtf8 src
+    GL.compileShader shader
