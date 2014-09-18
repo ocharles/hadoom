@@ -30,8 +30,8 @@ realiseSector sectorVertices = do
   vbo <- GL.genObjectName
   GL.bindBuffer GL.ArrayBuffer $= Just vbo
 
-  let expandVertices start@(V2 x1 y1) end@(V2 x2 y2) =
-        let n = case normalize $ perp $ start ^-^ end of
+  let expandEdge start@(V2 x1 y1) end@(V2 x2 y2) =
+        let n = case normalize $ perp $ end ^-^ start of
                   V2 x y -> V3 x 0 y
         in concat $ zipWith (\a b -> [a, b])
                             [ V3 x1 (-10) y1
@@ -41,8 +41,8 @@ realiseSector sectorVertices = do
                             ]
                             (repeat n)
 
-  let vertices = V.fromList $ concat $ zipWith expandVertices (V.toList sectorVertices)
-                                                              (V.toList $ V.tail sectorVertices <> sectorVertices)
+  let vertices = V.fromList $ concat $ zipWith expandEdge (V.toList sectorVertices)
+                                                          (V.toList $ V.tail sectorVertices <> sectorVertices)
 
   V.unsafeWith vertices $ \verticesPtr ->
     GL.bufferData GL.ArrayBuffer $=
@@ -80,8 +80,7 @@ main =
 
     GL.clearColor $= GL.Color4 0.5 0.5 0.5 1
 
-    drawSector <- realiseSector [ V2 (-25) (-25), V2 25 (-25), V2 25 25, V2 (-25) 25 ]
-
+    drawSector <- realiseSector [ V2 (-25) (-25), V2 0 (-40), V2 25 (-25), V2 25 25, V2 (-25) 25 ]
 
     let stride = fromIntegral $ sizeOf (0 :: V3 CFloat) * 2
         normalOffset = fromIntegral $ sizeOf (0 :: V3 CFloat)
