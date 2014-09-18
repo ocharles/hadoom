@@ -18,6 +18,7 @@ executable hadoom
   build-depends:
     base >=4.7 && <4.8,
     distributive,
+    JuicyPixels,
     lens,
     linear,
     OpenGL >= 2.9.2.0 && < 2.10,
