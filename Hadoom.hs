@@ -6,21 +6,20 @@ import Prelude hiding (floor, ceiling)
 import Control.Lens hiding (indices)
 import Data.Distributive (distribute)
 import Data.Function (fix)
-import Data.Monoid ((<>))
 import Data.Int (Int32)
-import Foreign (Ptr, alloca, castPtr, nullPtr, peek, sizeOf, with)
+import Data.Monoid ((<>))
 import Foreign.C (CFloat, withCString)
+import Foreign (Ptr, alloca, castPtr, nullPtr, peek, plusPtr, sizeOf, with)
 import Graphics.Rendering.OpenGL (($=))
+import Linear as L
 
 import qualified Data.Text.Encoding as Text
 import qualified Data.Text.IO as Text
-import qualified Graphics.UI.SDL.Basic as SDL
-import qualified Graphics.UI.SDL.Video as SDL
+import qualified Data.Vector.Storable as V
 import qualified Graphics.Rendering.OpenGL as GL
 import qualified Graphics.Rendering.OpenGL.Raw as GL
-import qualified Data.Vector.Storable as V
-
-import Linear as L
+import qualified Graphics.UI.SDL.Basic as SDL
+import qualified Graphics.UI.SDL.Video as SDL
 
 import Paths_hadoom
 
@@ -31,17 +30,29 @@ realiseSector sectorVertices = do
   vbo <- GL.genObjectName
   GL.bindBuffer GL.ArrayBuffer $= Just vbo
 
-  let floor = V.map (\(V2 x y) -> V3 x (-10) (y - 50)) sectorVertices
-      ceiling = V.map (\(V2 x y) -> V3 x 30 (y - 50)) sectorVertices
+  let expandVertices start@(V2 x1 y1) end@(V2 x2 y2) =
+        let n = case normalize $ perp $ start ^-^ end of
+                  V2 x y -> V3 x 0 y
+        in concat $ zipWith (\a b -> [a, b])
+                            [ V3 x1 (-10) y1
+                            , V3 x1   10  y1
+                            , V3 x2 (-10) y2
+                            , V3 x2   10  y2
+                            ]
+                            (repeat n)
 
-  V.unsafeWith (floor <> ceiling) $ \verticesPtr ->
+  let vertices = V.fromList $ concat $ zipWith expandVertices (V.toList sectorVertices)
+                                                              (V.toList $ V.tail sectorVertices <> sectorVertices)
+
+  V.unsafeWith vertices $ \verticesPtr ->
     GL.bufferData GL.ArrayBuffer $=
-      (fromIntegral (V.length sectorVertices * 2 * 3 * sizeOf (0 :: CFloat)), verticesPtr, GL.StaticDraw)
+      (fromIntegral (V.length sectorVertices * 2 * 2 * 3 * 2 * sizeOf (0 :: CFloat)), verticesPtr, GL.StaticDraw)
 
   let indices :: V.Vector Int32
-      indices = [0, 1, 2, 2, 3, 0] <> V.map (+ 4) [0, 1, 2, 2, 3, 0] <>
-                [0, 1, 4, 1, 2, 5, 2, 3, 6, 3, 0, 7] <>
-                [4, 5, 1, 5, 6, 2, 6, 7, 3, 7, 4, 0]
+      indices = V.fromList $ concatMap (\n -> [ n, n + 1, n + 2, n + 1, n + 3, n + 2 ]) $
+                               map fromIntegral $
+                                 map (* 4) $
+                                   [0 .. V.length sectorVertices]
 
   ibo <- GL.genObjectName
   GL.bindBuffer GL.ElementArrayBuffer $= Just ibo
@@ -69,13 +80,20 @@ main =
 
     GL.clearColor $= GL.Color4 0.5 0.5 0.5 1
 
-    drawSector <- realiseSector [ V2 (-25) (-25), V2 (-25) 25, V2 25 25, V2 25 (-25)]
+    drawSector <- realiseSector [ V2 (-25) (-25), V2 25 (-25), V2 25 25, V2 (-25) 25 ]
 
-    GL.vertexAttribPointer positionAttribute $= (GL.ToFloat, GL.VertexArrayDescriptor 3 GL.Float 0 nullPtr)
+
+    let stride = fromIntegral $ sizeOf (0 :: V3 CFloat) * 2
+        normalOffset = fromIntegral $ sizeOf (0 :: V3 CFloat)
+
+    GL.vertexAttribPointer positionAttribute $= (GL.ToFloat, GL.VertexArrayDescriptor 3 GL.Float stride nullPtr)
     GL.vertexAttribArray positionAttribute $= GL.Enabled
 
+    GL.vertexAttribPointer normalAttribute $= (GL.ToFloat, GL.VertexArrayDescriptor 3 GL.Float stride (nullPtr `plusPtr` normalOffset))
+    GL.vertexAttribArray normalAttribute $= GL.Enabled
+
     shaderProg <- createShaderProgram "shaders/vertex/projection-model.glsl"
-                                      "shaders/fragment/solid-white.glsl"
+                                     "shaders/fragment/solid-white.glsl"
     GL.currentProgram $= Just shaderProg
 
     let perspective =
@@ -94,11 +112,10 @@ main =
       GL.glUniformMatrix4fv loc 1 0 ptr
 
     (fix $ \f n -> do
-       GL.clearColor $= GL.Color4 0.5 0.2 1 1
        GL.clear [GL.ColorBuffer]
 
-       GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "model")
-       with (distribute (triangleTranslation !*! (eye4 & translation .~ V3 0 0 n))) $ \ptr ->
+       with (distribute (triangleTranslation !*! (eye4 & translation .~ V3 0 0 n))) $ \ptr -> do
+         GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "model")
          GL.glUniformMatrix4fv loc 1 0 (castPtr (ptr :: Ptr (M44 CFloat)))
 
        drawSector
@@ -110,18 +127,24 @@ main =
 positionAttribute :: GL.AttribLocation
 positionAttribute = GL.AttribLocation 0
 
+normalAttribute :: GL.AttribLocation
+normalAttribute = GL.AttribLocation 1
+
 createShaderProgram :: FilePath -> FilePath -> IO GL.Program
 createShaderProgram vertexShaderPath fragmentShaderPath = do
   vertexShader <- GL.createShader GL.VertexShader
-  fragmentShader <- GL.createShader GL.FragmentShader
-
   compileShader vertexShaderPath vertexShader
+
+  fragmentShader <- GL.createShader GL.FragmentShader
   compileShader fragmentShaderPath fragmentShader
 
   shaderProg <- GL.createProgram
   GL.attachShader shaderProg vertexShader
   GL.attachShader shaderProg fragmentShader
+
   GL.attribLocation shaderProg "in_Position" $= positionAttribute
+  GL.attribLocation shaderProg "in_Normal" $= normalAttribute
+
   GL.linkProgram shaderProg
 
   return shaderProg
