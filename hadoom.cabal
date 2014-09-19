@@ -23,8 +23,10 @@ executable hadoom
     linear,
     OpenGL >= 2.9.2.0 && < 2.10,
     OpenGLRaw >= 1.5 && < 1.6,
+    profunctors,
     sdl2 >= 1.1.0 && < 1.2,
     text >= 1.1.1.3 && < 1.2,
+    transformers,
     vector
   default-language:    Haskell2010
   ghc-options: -Wall

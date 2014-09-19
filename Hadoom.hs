@@ -1,10 +1,17 @@
+{-# LANGUAGE Arrows #-}
+{-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE OverloadedLists #-}
 module Main where
 
-import Prelude hiding (floor, ceiling)
+import Prelude hiding (floor, ceiling, (.), id)
 
+import Control.Arrow
+import Debug.Trace
+import Control.Category
 import Control.Applicative
 import Control.Lens hiding (indices)
+import Control.Monad (when)
+import Control.Monad.Fix (MonadFix)
 import Data.Distributive (distribute)
 import Data.Function (fix)
 import Data.Int (Int32)
@@ -13,6 +20,7 @@ import Foreign.C (CFloat, withCString)
 import Foreign (Ptr, Storable(..), alloca, castPtr, nullPtr, plusPtr, with)
 import Graphics.Rendering.OpenGL (($=))
 import Linear as L
+import Data.Functor.Identity
 
 import qualified Codec.Picture as JP
 import qualified Codec.Picture.Types as JP
@@ -22,7 +30,12 @@ import qualified Data.Vector.Storable as V
 import qualified Graphics.Rendering.OpenGL as GL
 import qualified Graphics.Rendering.OpenGL.Raw as GL
 import qualified Graphics.UI.SDL.Basic as SDL
+import qualified Graphics.UI.SDL.Enum as SDL
+import qualified Graphics.UI.SDL.Event as SDL
+import qualified Graphics.UI.SDL.Types as SDL
 import qualified Graphics.UI.SDL.Video as SDL
+
+import qualified FRP
 
 import Paths_hadoom
 
@@ -95,7 +108,7 @@ main :: IO ()
 main =
   alloca $ \winPtr ->
   alloca $ \rendererPtr -> do
-    _ <- SDL.init 0x00000020
+    _ <- SDL.init SDL.initFlagEverything
     _ <- SDL.createWindowAndRenderer 800 600 0 winPtr rendererPtr
 
     win <- peek winPtr
@@ -104,7 +117,11 @@ main =
 
     GL.clearColor $= GL.Color4 0.5 0.5 0.5 1
 
-    drawSector <- realiseSector [ V2 (-25) (-25), V2 0 (-40), V2 25 (-25), V2 25 25, V2 (-25) 25 ]
+    drawSector <- realiseSector [ V2 (-50) (-50)
+                               , V2 0 (-40)
+                               , V2 50 (-50)
+                               , V2 50 50
+                               , V2 (-50) 50 ]
 
     let stride = fromIntegral $ sizeOf (undefined :: Vertex)
         normalOffset = fromIntegral $ sizeOf (0 :: V3 CFloat)
@@ -124,7 +141,7 @@ main =
     GL.currentProgram $= Just shaderProg
 
     let perspective =
-          let fov = 90
+          let fov = 75
               s = recip (tan $ fov * 0.5 * pi / 180)
               far = 1000
               near = 1
@@ -160,10 +177,11 @@ main =
       GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "tex")
       GL.glUniform1i loc 0
 
-    (fix $ \f n -> do
+    (fix $ \f (w) -> do
        GL.clear [GL.ColorBuffer]
 
-       let viewMat = eye4 & translation .~ V3 0 0 n
+       events <- unfoldEvents
+       let FRP.Out viewMat w' = runIdentity $ FRP.stepWire 0.005 events w
 
        with (distribute viewMat) $ \ptr -> do
          GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "view")
@@ -178,7 +196,14 @@ main =
 
        SDL.glSwapWindow win
 
-       f (n + 0.001)) (- 10)
+       f (w')) (camera)
+
+unfoldEvents :: IO [SDL.Event]
+unfoldEvents = alloca $ \evtPtr -> do
+  r <- SDL.pollEvent evtPtr
+  case r of
+    0 -> return []
+    _ -> (:) <$> peek evtPtr <*> unfoldEvents
 
 positionAttribute :: GL.AttribLocation
 positionAttribute = GL.AttribLocation 0
@@ -214,3 +239,22 @@ createShaderProgram vertexShaderPath fragmentShaderPath = do
     src <- getDataFileName path >>= Text.readFile
     GL.shaderSourceBS shader $= Text.encodeUtf8 src
     GL.compileShader shader
+
+camera :: FRP.Wire Identity [SDL.Event] (M44 CFloat)
+camera = proc events -> do
+  let forwardVel = if events `hasScancode` SDL.scancodeUp then 50 else 0
+      rightVel = if events `hasScancode` SDL.scancodeRight then 5 else 0
+
+  quat <- axisAngle (V3 0 1 0) <$> FRP.integral -< rightVel
+
+  position <- FRP.integral -< over _x negate $ rotate quat (V3 0 0 1) * forwardVel
+
+  returnA -< m33_to_m44 (fromQuaternion quat) !*! mkTransformation 0 position
+
+  where
+  events `hasScancode` s =
+    case events of
+      [] -> False
+      (SDL.KeyboardEvent _ _ _ _ _ (SDL.Keysym scancode _ _)) : xs ->
+        if scancode == s then True else xs `hasScancode` s
+      _ : xs -> xs `hasScancode` s
