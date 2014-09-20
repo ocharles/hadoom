@@ -87,23 +87,15 @@ delay initial = Wire $ \_ a -> pure (Out initial (delay a))
 time :: Applicative m => Wire m a Time
 time = go 0 where go x = Wire $ \t _ -> pure (Out (t + x) (go (t + x)))
 
-integral :: (Applicative m, MonadFix m, Fractional a) => Wire m a a
+integral :: (Applicative m, MonadFix m, Fractional a, Show a) => Wire m a a
 integral = proc x -> do
   dt <- (-) <$> time <*> delay 0 . time -< ()
   rec i <- delay 0 -< i + x * realToFrac dt
-  returnA -< i
+  returnA -< traceShowId i
 
-integralWhenNaive :: (Applicative m, MonadFix m, Fractional a) => Wire m (a, Bool) a
-integralWhenNaive = proc (i,b) -> do
-  v <- integral -< i
-  vprev <- delay 0 -< v
-  let vdelta = v - vprev
-  rec result <- delay 0 -< if b then result + vdelta else result
-  returnA -< result
-
-integralWhenChoice :: (Applicative m, MonadFix m, Fractional a) => Wire m (a, Bool) a
-integralWhenChoice = proc (i, b) -> do
-  b' <- delay True -< b
-  rec v <- if b' then integral -< i
-                else returnA -< v
+integralWhen :: (Applicative m, MonadFix m, Fractional a, Show a) => Wire m (a, Bool) a
+integralWhen = proc (i, b) -> do
+  rec v' <- delay 0 -< v
+      v <- if b then arr (traceShowId) . integral -< i
+               else returnA -< v'
   returnA -< v

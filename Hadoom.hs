@@ -6,11 +6,9 @@ module Main where
 import Prelude hiding (floor, ceiling, (.), id)
 
 import Control.Arrow
-import Debug.Trace
 import Control.Category
 import Control.Applicative
 import Control.Lens hiding (indices)
-import Control.Monad (when)
 import Control.Monad.Fix (MonadFix)
 import Data.Distributive (distribute)
 import Data.Function (fix)
@@ -20,7 +18,6 @@ import Foreign.C (CFloat, withCString)
 import Foreign (Ptr, Storable(..), alloca, castPtr, nullPtr, plusPtr, with)
 import Graphics.Rendering.OpenGL (($=))
 import Linear as L
-import Data.Functor.Identity
 
 import qualified Codec.Picture as JP
 import qualified Codec.Picture.Types as JP
@@ -242,19 +239,42 @@ createShaderProgram vertexShaderPath fragmentShaderPath = do
 
 camera :: FRP.Wire Identity [SDL.Event] (M44 CFloat)
 camera = proc events -> do
-  let forwardVel = if events `hasScancode` SDL.scancodeUp then 50 else 0
-      rightVel = if events `hasScancode` SDL.scancodeRight then 5 else 0
+  goForward <- keyHeld SDL.scancodeUp -< events
+  turnRight <- keyHeld SDL.scancodeRight -< events
 
-  quat <- axisAngle (V3 0 1 0) <$> FRP.integral -< rightVel
-
-  position <- FRP.integral -< over _x negate $ rotate quat (V3 0 0 1) * forwardVel
+  quat <- axisAngle (V3 0 1 0) <$> FRP.integralWhen -< (1, turnRight)
+  rec position <- if goForward
+                   then FRP.integral -< over _x negate $ rotate quat (V3 0 0 1) * 1
+                   else returnA -< position'
+      position' <- FRP.delay 0 -< position
 
   returnA -< m33_to_m44 (fromQuaternion quat) !*! mkTransformation 0 position
 
-  where
-  events `hasScancode` s =
-    case events of
-      [] -> False
-      (SDL.KeyboardEvent _ _ _ _ _ (SDL.Keysym scancode _ _)) : xs ->
-        if scancode == s then True else xs `hasScancode` s
-      _ : xs -> xs `hasScancode` s
+keyPressed :: (Applicative m, MonadFix m) => SDL.Scancode -> FRP.Wire m [SDL.Event] Bool
+keyPressed scancode = proc events -> do
+  rec pressed <- FRP.delay False -< pressed || (filter ((== SDL.eventTypeKeyDown) . SDL.eventType) events `hasScancode` scancode)
+  returnA -< pressed
+
+keyReleased :: (Applicative m, MonadFix m) => SDL.Scancode -> FRP.Wire m [SDL.Event] Bool
+keyReleased scancode = proc events -> do
+  rec released <- FRP.delay False -< released || (filter ((== SDL.eventTypeKeyUp) . SDL.eventType) events `hasScancode` scancode)
+  returnA -< released
+
+keyHeld :: (Applicative m, MonadFix m) => SDL.Scancode -> FRP.Wire m [SDL.Event] Bool
+keyHeld scancode = proc events -> do
+  pressed <- keyPressed scancode -< events
+  if pressed
+    then do
+      released <- keyReleased scancode -< events
+      if released
+         then FRP.delay False . keyHeld scancode -< events
+         else returnA -< True
+
+    else returnA -< False
+
+hasScancode :: [SDL.Event] -> SDL.Scancode -> Bool
+events `hasScancode` s =
+  case events of
+    [] -> False
+    (SDL.KeyboardEvent _ _ _ _ _ (SDL.Keysym scancode _ _)) : xs -> scancode == s || xs `hasScancode` s
+    _ : xs -> xs `hasScancode` s

@@ -29,4 +29,5 @@ executable hadoom
     transformers,
     vector
   default-language:    Haskell2010
-  ghc-options: -Wall
+  ghc-options: -Wall -rtsopts
+  gch-prof-options: -fprof-auto
