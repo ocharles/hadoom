@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -fprof-auto #-}
 {-# LANGUAGE Arrows #-}
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE OverloadedLists #-}
@@ -11,7 +12,6 @@ import Control.Applicative
 import Control.Lens hiding (indices)
 import Control.Monad.Fix (MonadFix)
 import Data.Distributive (distribute)
-import Data.Function (fix)
 import Data.Int (Int32)
 import Data.Monoid ((<>))
 import Foreign.C (CFloat, withCString)
@@ -174,26 +174,29 @@ main =
       GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "tex")
       GL.glUniform1i loc 0
 
-    (fix $ \f (w) -> do
-       GL.clear [GL.ColorBuffer]
+    gameLoop win shaderProg drawSector camera
 
-       events <- unfoldEvents
-       let FRP.Out viewMat w' = runIdentity $ FRP.stepWire 0.005 events w
+gameLoop :: SDL.Window -> GL.Program -> IO a -> FRP.Wire Identity [SDL.Event] (M44 CFloat) -> IO b
+gameLoop win shaderProg drawSector w = do
+  GL.clear [GL.ColorBuffer]
 
-       with (distribute viewMat) $ \ptr -> do
-         GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "view")
-         GL.glUniformMatrix4fv loc 1 0 (castPtr (ptr :: Ptr (M44 CFloat)))
+  events <- unfoldEvents
+  let FRP.Out viewMat w' = runIdentity $ FRP.stepWire 0.005 events w
 
-       let lightPos = (viewMat !* (V4 0.5 0.5 0 1)) ^. _xyz
-       with lightPos $ \ptr -> do
-         GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "lightPos")
-         GL.glUniform3fv loc 1 (castPtr ptr)
+  with (distribute viewMat) $ \ptr -> do
+    GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "view")
+    GL.glUniformMatrix4fv loc 1 0 (castPtr (ptr :: Ptr (M44 CFloat)))
 
-       drawSector
+  let lightPos = (viewMat !* (V4 0.5 0.5 0 1)) ^. _xyz
+  with lightPos $ \ptr -> do
+    GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "lightPos")
+    GL.glUniform3fv loc 1 (castPtr ptr)
 
-       SDL.glSwapWindow win
+  _ <- drawSector
 
-       f (w')) (camera)
+  SDL.glSwapWindow win
+
+  gameLoop win shaderProg drawSector w'
 
 unfoldEvents :: IO [SDL.Event]
 unfoldEvents = alloca $ \evtPtr -> do
@@ -236,6 +239,20 @@ createShaderProgram vertexShaderPath fragmentShaderPath = do
     src <- getDataFileName path >>= Text.readFile
     GL.shaderSourceBS shader $= Text.encodeUtf8 src
     GL.compileShader shader
+
+camera' :: FRP.Wire Identity [SDL.Event] (M44 CFloat)
+camera' = proc events -> do
+  rec pressed <- FRP.delay False -< pressed || (filter ((== SDL.eventTypeKeyDown) . SDL.eventType) events `hasScancode` SDL.scancodeUp)
+  returnA -< eye4
+  -- turnRight <- keyHeld SDL.scancodeRight -< events
+
+  -- quat <- axisAngle (V3 0 1 0) <$> FRP.integralWhen -< (1, turnRight)
+  -- rec position <- if goForward
+  --                  then FRP.integral -< over _x negate $ rotate quat (V3 0 0 1) * 1
+  --                  else returnA -< position'
+  --     position' <- FRP.delay 0 -< position
+
+  -- returnA -< m33_to_m44 (fromQuaternion quat) !*! mkTransformation 0 position
 
 camera :: FRP.Wire Identity [SDL.Event] (M44 CFloat)
 camera = proc events -> do
