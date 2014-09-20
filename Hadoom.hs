@@ -41,7 +41,7 @@ type Sector = V.Vector (V2 CFloat)
 data Vertex = Vertex { vPos :: V3 CFloat
                      , vNorm :: V3 CFloat
                      , vUV :: V2 CFloat
-                     }
+                     } deriving (Show)
 
 instance Storable Vertex where
   sizeOf ~(Vertex p n uv) = sizeOf p + sizeOf n + sizeOf uv
@@ -75,18 +75,37 @@ realiseSector sectorVertices = do
                                            , V2 1 1
                                            ]
 
-  let vertices = V.fromList $ concat $ zipWith expandEdge (V.toList sectorVertices)
-                                                          (V.toList $ V.tail sectorVertices <> sectorVertices)
+  let wallVertices =
+        V.fromList $ concat $ zipWith expandEdge (V.toList sectorVertices)
+                                                 (V.toList $ V.tail sectorVertices <> sectorVertices)
+      floorVertices =
+        V.map (\(V2 x y) -> Vertex (V3 x (-20) y) (V3 0 1 0) (V2 0 0)) sectorVertices
+
+      ceilingVertices =
+        V.map (\(V2 x y) -> Vertex (V3 x 20 y) (V3 0 1 0) (V2 0 0)) sectorVertices
+
+      vertices = wallVertices <> floorVertices <> ceilingVertices
 
   V.unsafeWith vertices $ \verticesPtr ->
     GL.bufferData GL.ArrayBuffer $=
-      (fromIntegral (V.length sectorVertices * 2 * 2 * (3 + 3 + 2) * sizeOf (0 :: CFloat)), verticesPtr, GL.StaticDraw)
+      (fromIntegral (V.length vertices * sizeOf (undefined :: Vertex)), verticesPtr, GL.StaticDraw)
 
-  let indices :: V.Vector Int32
-      indices = V.fromList $ concatMap (\n -> [ n, n + 1, n + 2, n + 1, n + 3, n + 2 ]) $
-                               map fromIntegral $
-                                 map (* 4) $
-                                   [0 .. V.length sectorVertices]
+  let wallIndices :: V.Vector Int32
+      wallIndices =
+        V.fromList $ concatMap (\n -> [ n, n + 1, n + 2, n + 1, n + 3, n + 2 ]) $
+          map fromIntegral $
+            map (* 4)
+              [0 .. V.length sectorVertices - 1]
+
+      floorIndices = V.fromList $
+        let n = fromIntegral $ V.length wallVertices
+        in concatMap (\x -> [ n, n + x + 1, n + x + 2]) $
+                     map fromIntegral [0 .. V.length sectorVertices - 3]
+
+      ceilingIndices = V.map (+ (fromIntegral $ V.length floorVertices)) floorIndices
+
+      indices :: V.Vector Int32
+      indices = wallIndices <> floorIndices <> ceilingIndices
 
   ibo <- GL.genObjectName
   GL.bindBuffer GL.ElementArrayBuffer $= Just ibo
