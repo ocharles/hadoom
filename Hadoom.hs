@@ -254,11 +254,13 @@ main =
       GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "tex")
       GL.glUniform1i loc 0
 
+    GL.depthFunc $= Just GL.Less
+
     gameLoop win shaderProg drawSector camera
 
 gameLoop :: SDL.Window -> GL.Program -> IO a -> FRP.Wire Identity [SDL.Event] (M44 CFloat) -> IO b
 gameLoop win shaderProg drawSector w = do
-  GL.clear [GL.ColorBuffer]
+  GL.clear [GL.ColorBuffer, GL.DepthBuffer]
 
   events <- unfoldEvents
   let FRP.Out viewMat w' = runIdentity $ FRP.stepWire 0.005 events w
