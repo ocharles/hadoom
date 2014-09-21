@@ -1,8 +1,8 @@
-{ cabal, JuicyPixels, linear, OpenGL, sdl2, vector
+{ cabal, distributive, JuicyPixels, linear, OpenGL, profunctors, sdl2, text, vector
 }:
 cabal.mkDerivation (self: {
   pname = "hadoom";
   src = ./.;
   version = "1.0";
-  buildDepends = [ JuicyPixels linear OpenGL sdl2 vector ];
+  buildDepends = [ distributive JuicyPixels linear OpenGL profunctors sdl2 text vector ];
 })
