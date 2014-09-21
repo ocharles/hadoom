@@ -118,9 +118,9 @@ realiseSector sectorVertices = do
   let expandEdge start@(V2 x1 y1) end@(V2 x2 y2) =
         let n = case normalize $ perp $ end ^-^ start of
                   V2 x y -> V3 x 0 y
-        in getZipList $ Vertex <$> ZipList [ V3 x1 (-20) y1
+        in getZipList $ Vertex <$> ZipList [ V3 x1 (-10) y1
                                            , V3 x1   20  y1
-                                           , V3 x2 (-20) y2
+                                           , V3 x2 (-10) y2
                                            , V3 x2   20  y2
                                            ]
                                <*> ZipList (repeat n)
@@ -134,10 +134,10 @@ realiseSector sectorVertices = do
         V.fromList $ concat $ zipWith expandEdge (V.toList sectorVertices)
                                                  (V.toList $ V.tail sectorVertices <> sectorVertices)
       floorVertices =
-        V.map (\(V2 x y) -> Vertex (V3 x (-20) y) (V3 0 1 0) (V2 0 0)) sectorVertices
+        V.map (\(V2 x y) -> Vertex (V3 x (-10) y) (V3 0 1 0) (V2 x y ^* 0.05)) sectorVertices
 
       ceilingVertices =
-        V.map (\(V2 x y) -> Vertex (V3 x 20 y) (V3 0 1 0) (V2 0 0)) sectorVertices
+        V.map (\(Vertex p n uv) -> Vertex (p ^+^ V3 0 30 0) (negate n) uv) floorVertices
 
       vertices = wallVertices <> floorVertices <> ceilingVertices
 
