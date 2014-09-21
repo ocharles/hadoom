@@ -19,11 +19,13 @@ import Foreign (Ptr, Storable(..), alloca, castPtr, nullPtr, plusPtr, with)
 import Graphics.Rendering.OpenGL (($=))
 import Linear as L
 
+import qualified Data.IntMap as IntMap
 import qualified Codec.Picture as JP
 import qualified Codec.Picture.Types as JP
 import qualified Data.Text.Encoding as Text
 import qualified Data.Text.IO as Text
-import qualified Data.Vector.Storable as V
+import qualified Data.Vector as V
+import qualified Data.Vector.Storable as SV
 import qualified Graphics.Rendering.OpenGL as GL
 import qualified Graphics.Rendering.OpenGL.Raw as GL
 import qualified Graphics.UI.SDL.Basic as SDL
@@ -54,6 +56,59 @@ instance Storable Vertex where
     poke (castPtr $ ptr `plusPtr` sizeOf p) n
     poke (castPtr $ ptr `plusPtr` sizeOf p `plusPtr` sizeOf n) uv
 
+triangleArea :: Fractional a => V2 a -> V2 a -> V2 a -> a
+triangleArea (V2 p0x p0y) (V2 p1x p1y) (V2 p2x p2y) =
+  0.5 * ((negate p1y) * p2x + p0y * ((negate p1x) + p2x) + p0x * (p1y - p2y) + p1x * p2y)
+
+pointInTriangle :: (Fractional a, Ord a) => V2 a -> V2 a -> V2 a -> V2 a -> Bool
+pointInTriangle p0@(V2 p0x p0y) p1@(V2 p1x p1y) p2@(V2 p2x p2y) (V2 px py) =
+  let area = triangleArea p0 p1 p2
+      s = 1 / (2 * area) * (p0y * p2x - p0x * p2y + (p2y - p0y) * px + (p0x - p2x) * py)
+      t = 1 / (2 * area) * (p0x * p1y - p0y * p1x + (p0y - p1y) * px + (p1x - p0x) * py)
+  in s > 0 && t > 0 && (1 - s - t) > 0
+
+poly :: V.Vector (V2 CFloat)
+poly = [ V2 0 0, V2 10 0, V2 10 5, V2 5 2, V2 0 5 ]
+
+earsOn :: (Fractional b, Ord b) => (a -> V2 b) -> V.Vector a -> V.Vector a
+earsOn f vertices =
+  V.ifilter (\i v ->
+               let n0 = (i - 1) `mod` n
+                   n1 = i
+                   n2 = (i + 1) `mod` n
+                   v0 = f $ vertices V.! n0
+                   v1 = f v
+                   v2 = f $ vertices V.! n2
+                   area = triangleArea v0 v1 v2
+                   otherVertices =
+                     V.ifilter (\j _ ->
+                                  not (j `elem`
+                                       [n0,n1,n2]))
+                               vertices
+                   containsOther =
+                     V.any (pointInTriangle v0 v1 v2 . f) otherVertices
+               in area > 0 && not containsOther)
+            vertices
+  where n = V.length vertices
+
+triangulate :: (Fractional a, Ord a, Show a) => V.Vector (V2 a) -> [Int]
+triangulate vertices =
+  let go ears vMap
+        | not (V.null ears) =
+          let (i,_) = V.head ears
+              n0 = head $ (filter (< i) $ reverse $ IntMap.keys vMap) <>
+                          (filter (> i) $ reverse $ IntMap.keys vMap)
+              n1 = i
+              n2 = head $ (filter (> i) $ IntMap.keys vMap) <>
+                          (filter (< i) $ reverse $ IntMap.keys vMap)
+              vRem = IntMap.delete n1 vMap
+          in [n0,n1,n2] <>
+             go (earsOn snd $ V.fromList $ IntMap.toList vRem)
+                vRem
+        | otherwise = []
+      indexedVs = V.imap (\i v -> (i,v)) vertices
+  in go (earsOn snd indexedVs)
+        (IntMap.fromList $ V.toList indexedVs)
 
 realiseSector :: Sector -> IO (IO ())
 realiseSector sectorVertices = do
@@ -86,7 +141,7 @@ realiseSector sectorVertices = do
 
       vertices = wallVertices <> floorVertices <> ceilingVertices
 
-  V.unsafeWith vertices $ \verticesPtr ->
+  SV.unsafeWith (V.convert vertices) $ \verticesPtr ->
     GL.bufferData GL.ArrayBuffer $=
       (fromIntegral (V.length vertices * sizeOf (undefined :: Vertex)), verticesPtr, GL.StaticDraw)
 
@@ -97,10 +152,9 @@ realiseSector sectorVertices = do
             map (* 4)
               [0 .. V.length sectorVertices - 1]
 
-      floorIndices = V.fromList $
+      floorIndices =
         let n = fromIntegral $ V.length wallVertices
-        in concatMap (\x -> [ n, n + x + 1, n + x + 2]) $
-                     map fromIntegral [0 .. V.length sectorVertices - 3]
+        in V.fromList $ map (fromIntegral . (+ n)) (triangulate sectorVertices)
 
       ceilingIndices = V.map (+ (fromIntegral $ V.length floorVertices)) floorIndices
 
@@ -110,7 +164,7 @@ realiseSector sectorVertices = do
   ibo <- GL.genObjectName
   GL.bindBuffer GL.ElementArrayBuffer $= Just ibo
 
-  V.unsafeWith indices $ \indicesPtr ->
+  SV.unsafeWith (V.convert indices) $ \indicesPtr ->
     GL.bufferData GL.ElementArrayBuffer $=
       (fromIntegral (V.length indices * sizeOf (0 :: Int32)), indicesPtr, GL.StaticDraw)
 
@@ -134,7 +188,10 @@ main =
     GL.clearColor $= GL.Color4 0.5 0.5 0.5 1
 
     drawSector <- realiseSector [ V2 (-50) (-50)
-                               , V2 0 (-40)
+                               , V2 (-30) (-50)
+                               , V2 (-30) (-30)
+                               , V2 10 (-30)
+                               , V2 10 (-50)
                                , V2 50 (-50)
                                , V2 50 50
                                , V2 (-50) 50 ]
@@ -167,7 +224,7 @@ main =
              , 0, 0, -((far*near)/(far-near)), 1
              ]
 
-    V.unsafeWith perspective $ \ptr -> do
+    SV.unsafeWith perspective $ \ptr -> do
       GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "projection")
       GL.glUniformMatrix4fv loc 1 0 ptr
 
@@ -181,7 +238,7 @@ main =
         let toRgb8 = JP.convertPixel :: JP.PixelYCbCr8 -> JP.PixelRGB8
             toRgbF = JP.promotePixel :: JP.PixelRGB8 -> JP.PixelRGBF
         case JP.pixelMap (toRgbF . toRgb8) img of
-          JP.Image w h d -> V.unsafeWith d $ \ptr -> do
+          JP.Image w h d -> SV.unsafeWith d $ \ptr -> do
             GL.texImage2D GL.Texture2D GL.NoProxy 0 GL.RGB32F
                           (GL.TextureSize2D (fromIntegral w) (fromIntegral h))
                           0 (GL.PixelData GL.RGB GL.Float ptr)
@@ -259,20 +316,6 @@ createShaderProgram vertexShaderPath fragmentShaderPath = do
     GL.shaderSourceBS shader $= Text.encodeUtf8 src
     GL.compileShader shader
 
-camera' :: FRP.Wire Identity [SDL.Event] (M44 CFloat)
-camera' = proc events -> do
-  rec pressed <- FRP.delay False -< pressed || (filter ((== SDL.eventTypeKeyDown) . SDL.eventType) events `hasScancode` SDL.scancodeUp)
-  returnA -< eye4
-  -- turnRight <- keyHeld SDL.scancodeRight -< events
-
-  -- quat <- axisAngle (V3 0 1 0) <$> FRP.integralWhen -< (1, turnRight)
-  -- rec position <- if goForward
-  --                  then FRP.integral -< over _x negate $ rotate quat (V3 0 0 1) * 1
-  --                  else returnA -< position'
-  --     position' <- FRP.delay 0 -< position
-
-  -- returnA -< m33_to_m44 (fromQuaternion quat) !*! mkTransformation 0 position
-
 camera :: FRP.Wire Identity [SDL.Event] (M44 CFloat)
 camera = proc events -> do
   goForward <- keyHeld SDL.scancodeUp -< events
@@ -280,7 +323,7 @@ camera = proc events -> do
 
   quat <- axisAngle (V3 0 1 0) <$> FRP.integralWhen -< (1, turnRight)
   rec position <- if goForward
-                   then FRP.integral -< over _x negate $ rotate quat (V3 0 0 1) * 1
+                   then FRP.integral -< over _x negate $ rotate quat (V3 0 0 1) * 2
                    else returnA -< position'
       position' <- FRP.delay 0 -< position
 
@@ -288,7 +331,10 @@ camera = proc events -> do
 
 keyPressed :: (Applicative m, MonadFix m) => SDL.Scancode -> FRP.Wire m [SDL.Event] Bool
 keyPressed scancode = proc events -> do
-  rec pressed <- FRP.delay False -< pressed || (filter ((== SDL.eventTypeKeyDown) . SDL.eventType) events `hasScancode` scancode)
+  rec pressed <- FRP.delay False -<
+                   pressed ||
+                     (filter ((== SDL.eventTypeKeyDown) . SDL.eventType) events
+                        `hasScancode` scancode)
   returnA -< pressed
 
 keyReleased :: (Applicative m, MonadFix m) => SDL.Scancode -> FRP.Wire m [SDL.Event] Bool
@@ -297,16 +343,14 @@ keyReleased scancode = proc events -> do
   returnA -< released
 
 keyHeld :: (Applicative m, MonadFix m) => SDL.Scancode -> FRP.Wire m [SDL.Event] Bool
-keyHeld scancode = proc events -> do
-  pressed <- keyPressed scancode -< events
-  if pressed
-    then do
-      released <- keyReleased scancode -< events
-      if released
-         then FRP.delay False . keyHeld scancode -< events
-         else returnA -< True
-
-    else returnA -< False
+keyHeld scancode =
+  proc events ->
+  do pressed <- keyPressed scancode -< events
+     if pressed then
+       do released <- keyReleased scancode -< events
+          if released then FRP.delay False . keyHeld scancode -< events else
+            returnA -< True
+       else returnA -< False
 
 hasScancode :: [SDL.Event] -> SDL.Scancode -> Bool
 events `hasScancode` s =
