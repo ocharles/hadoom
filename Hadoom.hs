@@ -100,7 +100,7 @@ triangulate vertices =
                           (filter (> i) $ reverse $ IntMap.keys vMap)
               n1 = i
               n2 = head $ (filter (> i) $ IntMap.keys vMap) <>
-                          (filter (< i) $ reverse $ IntMap.keys vMap)
+                          (filter (< i) $ IntMap.keys vMap)
               vRem = IntMap.delete n1 vMap
           in [n0,n1,n2] <>
              go (earsOn snd $ V.fromList $ IntMap.toList vRem)
@@ -194,6 +194,10 @@ main =
                                , V2 10 (-50)
                                , V2 50 (-50)
                                , V2 50 50
+                               , V2 30 50
+                               , V2 30 30
+                               , V2 (-40) 30
+                               , V2 (-40) 50
                                , V2 (-50) 50 ]
 
     let stride = fromIntegral $ sizeOf (undefined :: Vertex)
