@@ -112,11 +112,11 @@ integral :: (Applicative m, MonadFix m, Fractional a, Show a) => Wire m a a
 integral = proc x -> do
   dt <- (-) <$> time <*> delay 0 . time -< ()
   rec i <- delay 0 -< i + x * realToFrac dt
-  returnA -< traceShowId i
+  returnA -< i
 
 integralWhen :: (Applicative m, MonadFix m, Fractional a, Show a) => Wire m (a, Bool) a
 integralWhen = proc (i, b) -> do
   rec v' <- delay 0 -< v
-      v <- if b then arr (traceShowId) . integral -< i
+      v <- if b then integral -< i
                else returnA -< v'
   returnA -< v

@@ -1,14 +1,14 @@
-{-# OPTIONS_GHC -fprof-auto #-}
 {-# LANGUAGE Arrows #-}
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE OverloadedLists #-}
+{-# LANGUAGE RecordWildCards #-}
 module Main where
 
 import Prelude hiding (any, floor, ceiling, (.), id)
 
+import Control.Applicative
 import Control.Arrow
 import Control.Category
-import Control.Applicative
 import Control.Lens hiding (indices)
 import Control.Monad.Fix (MonadFix)
 import Data.Distributive (distribute)
@@ -22,6 +22,7 @@ import Linear as L
 
 import qualified Codec.Picture as JP
 import qualified Codec.Picture.Types as JP
+import qualified Data.IntMap.Strict as IM
 import qualified Data.Text.Encoding as Text
 import qualified Data.Text.IO as Text
 import qualified Data.Vector as V
@@ -38,12 +39,17 @@ import qualified FRP
 
 import Paths_hadoom
 
-type Sector = V.Vector (V2 CFloat)
+data Sector =
+  Sector {sectorVertices :: IM.IntMap (V2 CFloat)
+         ,sectorWalls :: V.Vector (Int,Int)
+         ,sectorFloor :: CFloat
+         ,sectorCeiling :: CFloat}
 
-data Vertex = Vertex { vPos :: V3 CFloat
-                     , vNorm :: V3 CFloat
-                     , vUV :: V2 CFloat
-                     } deriving (Show)
+data Vertex =
+  Vertex {vPos :: {-# UNPACK #-} !(V3 CFloat)
+         ,vNorm :: {-# UNPACK #-} !(V3 CFloat)
+         ,vUV :: {-# UNPACK #-} !(V2 CFloat)}
+  deriving (Show)
 
 instance Storable Vertex where
   sizeOf ~(Vertex p n uv) = sizeOf p + sizeOf n + sizeOf uv
@@ -82,7 +88,7 @@ triangulate = go . addIndices
           | V.length s < 3 = empty
           | otherwise =
             do (v0@(n0,_),(n1,_),v2@(n2,_),others) <- takeFirst isEar (separate s)
-               [n0,n1,n2] <> go (v0 `V.cons` (v2 `V.cons` others))
+               [n0,n2,n1] <> go (v0 `V.cons` (v2 `V.cons` others))
 
         addIndices vertices =
           V.zip [0 .. V.length vertices] vertices
@@ -100,65 +106,124 @@ triangulate = go . addIndices
                             vertices)
 
 realiseSector :: Sector -> IO (IO ())
-realiseSector sectorVertices = do
-  vbo <- GL.genObjectName
-  GL.bindBuffer GL.ArrayBuffer $= Just vbo
+realiseSector Sector{..} =
+  do vao <- GL.genObjectName :: IO (GL.VertexArrayObject)
+     GL.bindVertexArrayObject $= Just vao
 
-  let expandEdge start@(V2 x1 y1) end@(V2 x2 y2) =
-        let n = case normalize $ perp $ end ^-^ start of
-                  V2 x y -> V3 x 0 y
-        in getZipList $ Vertex <$> ZipList [ V3 x1 (-10) y1
-                                           , V3 x1   20  y1
-                                           , V3 x2 (-10) y2
-                                           , V3 x2   20  y2
-                                           ]
-                               <*> ZipList (repeat n)
-                               <*> ZipList [ V2 0 0
-                                           , V2 0 1
-                                           , V2 1 0
-                                           , V2 1 1
-                                           ]
+     vbo <- GL.genObjectName
+     GL.bindBuffer GL.ArrayBuffer $=
+       Just vbo
 
-  let wallVertices =
-        V.fromList $ concat $ zipWith expandEdge (V.toList sectorVertices)
-                                                 (V.toList $ V.tail sectorVertices <> sectorVertices)
-      floorVertices =
-        V.map (\(V2 x y) -> Vertex (V3 x (-10) y) (V3 0 1 0) (V2 x y ^* 0.05)) sectorVertices
+     let expandEdge start@(V2 x1 y1) end@(V2 x2 y2) =
+           let n =
+                 case normalize $ perp $ end ^-^ start of
+                   V2 x y -> V3 x 0 y
+           in V.fromList $ getZipList $ Vertex <$>
+              ZipList [V3 x1 sectorFloor y1
+                      ,V3 x1 sectorCeiling y1
+                      ,V3 x2 sectorFloor y2
+                      ,V3 x2 sectorCeiling y2] <*>
+              ZipList (repeat n) <*>
+              ZipList [V2 0 0,V2 0 1,V2 1 0,V2 1 1]
 
-      ceilingVertices =
-        V.map (\(Vertex p n uv) -> Vertex (p ^+^ V3 0 30 0) (negate n) uv) floorVertices
+         wallVertices =
+           V.concatMap
+             (\(s,e) ->
+                expandEdge (sectorVertices IM.! s)
+                           (sectorVertices IM.! e))
+             sectorWalls
 
-      vertices = wallVertices <> floorVertices <> ceilingVertices
+         floorVertices =
+           V.map (\(V2 x y) ->
+                    Vertex (V3 x sectorFloor y)
+                           (V3 0 1 0)
+                           (V2 x y ^*
+                            5.0e-2))
+                 (V.fromList $ IM.elems sectorVertices)
 
-  SV.unsafeWith (V.convert vertices) $ \verticesPtr ->
-    GL.bufferData GL.ArrayBuffer $=
-      (fromIntegral (V.length vertices * sizeOf (undefined :: Vertex)), verticesPtr, GL.StaticDraw)
+         ceilingVertices =
+           V.map (\(Vertex p n uv) ->
+                    Vertex (p & _y .~ sectorCeiling)
+                           (negate n)
+                           uv)
+                 floorVertices
 
-  let wallIndices :: V.Vector Int32
-      wallIndices =
-        V.fromList $ concatMap (\n -> [ n, n + 1, n + 2, n + 1, n + 3, n + 2 ]) $
-          map fromIntegral $
-            map (* 4)
-              [0 .. V.length sectorVertices - 1]
+         vertices = wallVertices <> floorVertices <> ceilingVertices
 
-      floorIndices =
-        let n = fromIntegral $ V.length wallVertices
-        in fmap (fromIntegral . (+ n)) $ triangulate sectorVertices
+     SV.unsafeWith (V.convert vertices) $
+       \verticesPtr ->
+         GL.bufferData GL.ArrayBuffer $=
+         (fromIntegral
+            (V.length vertices *
+             sizeOf (undefined :: Vertex))
+         ,verticesPtr
+         ,GL.StaticDraw)
 
-      ceilingIndices = V.map (+ (fromIntegral $ V.length floorVertices)) floorIndices
+     let stride = fromIntegral $ sizeOf (undefined :: Vertex)
+         normalOffset = fromIntegral $ sizeOf (0 :: V3 CFloat)
+         uvOffset = normalOffset + fromIntegral (sizeOf (0 :: V3 CFloat))
 
-      indices :: V.Vector Int32
-      indices = wallIndices <> floorIndices <> ceilingIndices
+     GL.vertexAttribPointer positionAttribute $=
+       (GL.ToFloat,GL.VertexArrayDescriptor 3 GL.Float stride nullPtr)
+     GL.vertexAttribArray positionAttribute $= GL.Enabled
 
-  ibo <- GL.genObjectName
-  GL.bindBuffer GL.ElementArrayBuffer $= Just ibo
+     GL.vertexAttribPointer normalAttribute $=
+       (GL.ToFloat
+       ,GL.VertexArrayDescriptor 3
+                                 GL.Float
+                                 stride
+                                 (nullPtr `plusPtr` normalOffset))
+     GL.vertexAttribArray normalAttribute $= GL.Enabled
 
-  SV.unsafeWith (V.convert indices) $ \indicesPtr ->
-    GL.bufferData GL.ElementArrayBuffer $=
-      (fromIntegral (V.length indices * sizeOf (0 :: Int32)), indicesPtr, GL.StaticDraw)
+     GL.vertexAttribPointer uvAttribute $=
+       (GL.ToFloat
+       ,GL.VertexArrayDescriptor 2
+                                 GL.Float
+                                 stride
+                                 (nullPtr `plusPtr` uvOffset))
+     GL.vertexAttribArray uvAttribute $= GL.Enabled
 
-  return $
-    GL.drawElements GL.Triangles (fromIntegral $ V.length indices) GL.UnsignedInt nullPtr
+     let wallIndices =
+           V.concatMap id $
+           V.imap (\m _ ->
+                     let n = m * 4
+                     in V.map fromIntegral [n,n + 2,n + 1,n + 1,n + 2,n + 3])
+                  sectorWalls
+
+         floorIndices =
+           let n = fromIntegral $ V.length wallVertices
+           in fmap (fromIntegral . (+ n)) $
+              triangulate (V.fromList $ IM.elems sectorVertices)
+
+         ceilingIndices =
+           V.map (+ (fromIntegral $ V.length floorVertices)) $
+           V.concatMap id $
+           V.zipWith3 (\a b c -> [a,c,b])
+                      floorIndices
+                      (V.drop 1 $ floorIndices <> floorIndices)
+                      (V.drop 2 $ floorIndices <> floorIndices)
+
+         indices :: V.Vector Int32
+         indices = wallIndices <> floorIndices <> ceilingIndices
+
+     ibo <- GL.genObjectName
+     GL.bindBuffer GL.ElementArrayBuffer $= Just ibo
+
+     SV.unsafeWith (V.convert indices) $
+       \indicesPtr ->
+         GL.bufferData GL.ElementArrayBuffer $=
+         (fromIntegral
+            (V.length indices *
+             sizeOf (0 :: Int32))
+         ,indicesPtr
+         ,GL.StaticDraw)
+
+     return $
+       do GL.bindVertexArrayObject $= Just vao
+          GL.drawElements GL.Triangles
+                          (fromIntegral $ V.length indices)
+                          GL.UnsignedInt
+                          nullPtr
 
 triangleTranslation :: Floating a => M44 a
 triangleTranslation = eye4 & translation .~ V3 0 0 (-5)
@@ -169,41 +234,35 @@ main =
   alloca $ \rendererPtr -> do
     _ <- SDL.init SDL.initFlagEverything
     _ <- SDL.createWindowAndRenderer 800 600 0 winPtr rendererPtr
-
     win <- peek winPtr
-
     withCString "Hadoom" $ SDL.setWindowTitle win
-
     GL.clearColor $= GL.Color4 0.5 0.5 0.5 1
+    GL.cullFace $= Just GL.Back
 
-    drawSector <- realiseSector [ V2 (-50) (-50)
-                               , V2 (-30) (-50)
-                               , V2 (-30) (-30)
-                               , V2 10 (-30)
-                               , V2 10 (-50)
-                               , V2 50 (-50)
-                               , V2 50 50
-                               , V2 30 50
-                               , V2 30 30
-                               , V2 (-40) 30
-                               , V2 (-40) 50
-                               , V2 (-50) 50 ]
-
-    let stride = fromIntegral $ sizeOf (undefined :: Vertex)
-        normalOffset = fromIntegral $ sizeOf (0 :: V3 CFloat)
-        uvOffset = normalOffset + fromIntegral (sizeOf (0 :: V3 CFloat))
-
-    GL.vertexAttribPointer positionAttribute $= (GL.ToFloat, GL.VertexArrayDescriptor 3 GL.Float stride nullPtr)
-    GL.vertexAttribArray positionAttribute $= GL.Enabled
-
-    GL.vertexAttribPointer normalAttribute $= (GL.ToFloat, GL.VertexArrayDescriptor 3 GL.Float stride (nullPtr `plusPtr` normalOffset))
-    GL.vertexAttribArray normalAttribute $= GL.Enabled
-
-    GL.vertexAttribPointer uvAttribute $= (GL.ToFloat, GL.VertexArrayDescriptor 2 GL.Float stride (nullPtr `plusPtr` uvOffset))
-    GL.vertexAttribArray uvAttribute $= GL.Enabled
+    drawSector1 <-
+      let vertices = IM.fromList $ zip [0 ..] [V2 (-50) (-50) ,V2 (-30) (-50)
+                                              ,V2 (-30) (-30) ,V2 10 (-30)
+                                              ,V2 10 (-50) ,V2 50 (-50)
+                                              ,V2 50 50 ,V2 30 50 ,V2 30 60
+                                              ,V2 10 60 ,V2 (-10) 60
+                                              ,V2 (-40) 60 ,V2 (-40) 50
+                                              ,V2 (-50) 50]
+      in realiseSector Sector {sectorVertices = vertices
+                              ,sectorCeiling = 20
+                              ,sectorFloor = 0
+                              ,sectorWalls = [(0,1),(1,2),(2,3),(3,4),(4,5)
+                                             ,(5,6),(6,7),(7,8),(8,9)
+                                             ,(10,11),(11,12),(12,0)]}
+    drawSector2 <-
+      let vertices = IM.fromList $ zip [0 ..] [V2 (-30) 60,V2 (-10) 60,V2 10 60
+                                              ,V2 30 60,V2 30 100,V2 (-30) 100]
+      in realiseSector Sector {sectorVertices = vertices
+                              ,sectorCeiling = 20
+                              ,sectorFloor = 0
+                              ,sectorWalls = [(0,1),(2,3),(3,4),(4,5),(5,0)]}
 
     shaderProg <- createShaderProgram "shaders/vertex/projection-model.glsl"
-                                     "shaders/fragment/solid-white.glsl"
+                                      "shaders/fragment/solid-white.glsl"
     GL.currentProgram $= Just shaderProg
 
     let perspective =
@@ -211,41 +270,55 @@ main =
               s = recip (tan $ fov * 0.5 * pi / 180)
               far = 1000
               near = 1
-          in [ s, 0, 0, 0
-             , 0, s, 0, 0
-             , 0, 0, -(far/(far - near)), -1
-             , 0, 0, -((far*near)/(far-near)), 1
-             ]
+          in [s ,0 ,0 ,0
+             ,0 ,s ,0 ,0
+             ,0 ,0 ,-(far / (far - near)) ,-1
+             ,0 ,0 ,-((far * near) / (far - near)) ,1]
 
-    SV.unsafeWith perspective $ \ptr -> do
-      GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "projection")
-      GL.glUniformMatrix4fv loc 1 0 ptr
+    SV.unsafeWith perspective $
+      \ptr ->
+        do GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "projection")
+           GL.glUniformMatrix4fv loc 1 0 ptr
 
-    x <- JP.readImage "wall-2.jpg"
-    case x of
-      Right (JP.ImageYCbCr8 img) -> do
-        GL.activeTexture $= GL.TextureUnit 0
-        t <- GL.genObjectName
-        GL.textureBinding GL.Texture2D $= Just t
-        GL.textureFilter GL.Texture2D $= ((GL.Linear', Nothing), GL.Linear')
-        let toRgb8 = JP.convertPixel :: JP.PixelYCbCr8 -> JP.PixelRGB8
-            toRgbF = JP.promotePixel :: JP.PixelRGB8 -> JP.PixelRGBF
-        case JP.pixelMap (toRgbF . toRgb8) img of
-          JP.Image w h d -> SV.unsafeWith d $ \ptr -> do
-            GL.texImage2D GL.Texture2D GL.NoProxy 0 GL.RGB32F
-                          (GL.TextureSize2D (fromIntegral w) (fromIntegral h))
-                          0 (GL.PixelData GL.RGB GL.Float ptr)
-
-      Left e -> error e
-      _ -> error "Unknown image format"
-
-    do
-      GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "tex")
-      GL.glUniform1i loc 0
+    do GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "tex")
+       GL.glUniform1i loc 0
 
     GL.depthFunc $= Just GL.Less
 
-    gameLoop win shaderProg drawSector camera
+    wall1 <- loadTexture "wall.jpg"
+    wall2 <- loadTexture "wall-2.jpg"
+    gameLoop win shaderProg (do GL.textureBinding GL.Texture2D $= Just wall1
+                                drawSector1
+                                GL.textureBinding GL.Texture2D $= Just wall2
+                                drawSector2) camera
+
+loadTexture :: FilePath -> IO GL.TextureObject
+loadTexture path =
+  do x <- JP.readImage path
+     case x of
+       Right (JP.ImageYCbCr8 img) ->
+         do GL.activeTexture $= GL.TextureUnit 0
+            t <- GL.genObjectName
+            GL.textureBinding GL.Texture2D $= Just t
+            GL.textureFilter GL.Texture2D $= ((GL.Linear',Nothing),GL.Linear')
+            let toRgb8 = JP.convertPixel :: JP.PixelYCbCr8 -> JP.PixelRGB8
+                toRgbF = JP.promotePixel :: JP.PixelRGB8 -> JP.PixelRGBF
+            case JP.pixelMap (toRgbF . toRgb8) img of
+              JP.Image w h d ->
+                SV.unsafeWith d $
+                \ptr ->
+                  do GL.texImage2D
+                       GL.Texture2D
+                       GL.NoProxy
+                       0
+                       GL.RGB32F
+                       (GL.TextureSize2D (fromIntegral w)
+                                         (fromIntegral h))
+                       0
+                       (GL.PixelData GL.RGB GL.Float ptr)
+                     return t
+       Left e -> error e
+       _ -> error "Unknown image format"
 
 gameLoop :: SDL.Window -> GL.Program -> IO a -> FRP.Wire Identity [SDL.Event] (M44 CFloat) -> IO b
 gameLoop win shaderProg drawSector w = do
@@ -326,7 +399,7 @@ camera = proc events -> do
                    else returnA -< position'
       position' <- FRP.delay 0 -< position
 
-  returnA -< m33_to_m44 (fromQuaternion quat) !*! mkTransformation 0 position
+  returnA -< m33_to_m44 (fromQuaternion quat) !*! mkTransformation 0 (position - V3 0 10 0)
 
 keyPressed :: (Applicative m, MonadFix m) => SDL.Scancode -> FRP.Wire m [SDL.Event] Bool
 keyPressed scancode = proc events -> do
