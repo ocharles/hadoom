@@ -4,14 +4,16 @@
 {-# LANGUAGE OverloadedLists #-}
 module Main where
 
-import Prelude hiding (floor, ceiling, (.), id)
+import Prelude hiding (any, floor, ceiling, (.), id)
 
 import Control.Arrow
 import Control.Category
 import Control.Applicative
 import Control.Lens hiding (indices)
+import Control.Monad (mzero)
 import Control.Monad.Fix (MonadFix)
 import Data.Distributive (distribute)
+import Data.Foldable (any, toList)
 import Data.Int (Int32)
 import Data.Monoid ((<>))
 import Foreign.C (CFloat, withCString)
@@ -19,7 +21,6 @@ import Foreign (Ptr, Storable(..), alloca, castPtr, nullPtr, plusPtr, with)
 import Graphics.Rendering.OpenGL (($=))
 import Linear as L
 
-import qualified Data.IntMap as IntMap
 import qualified Codec.Picture as JP
 import qualified Codec.Picture.Types as JP
 import qualified Data.Text.Encoding as Text
@@ -33,6 +34,8 @@ import qualified Graphics.UI.SDL.Enum as SDL
 import qualified Graphics.UI.SDL.Event as SDL
 import qualified Graphics.UI.SDL.Types as SDL
 import qualified Graphics.UI.SDL.Video as SDL
+
+import qualified Data.Sequence as Seq
 
 import qualified FRP
 
@@ -70,45 +73,39 @@ pointInTriangle p0@(V2 p0x p0y) p1@(V2 p1x p1y) p2@(V2 p2x p2y) (V2 px py) =
 poly :: V.Vector (V2 CFloat)
 poly = [ V2 0 0, V2 10 0, V2 10 5, V2 5 2, V2 0 5 ]
 
-earsOn :: (Fractional b, Ord b) => (a -> V2 b) -> V.Vector a -> V.Vector a
-earsOn f vertices =
-  V.ifilter (\i v ->
-               let n0 = (i - 1) `mod` n
-                   n1 = i
-                   n2 = (i + 1) `mod` n
-                   v0 = f $ vertices V.! n0
-                   v1 = f v
-                   v2 = f $ vertices V.! n2
-                   area = triangleArea v0 v1 v2
-                   otherVertices =
-                     V.ifilter (\j _ ->
-                                  not (j `elem`
-                                       [n0,n1,n2]))
-                               vertices
-                   containsOther =
-                     V.any (pointInTriangle v0 v1 v2 . f) otherVertices
-               in area > 0 && not containsOther)
-            vertices
-  where n = V.length vertices
+triangulate :: (Fractional a, Ord a) => Seq.Seq (V2 a) -> Seq.Seq (Int, Int, Int)
+triangulate = go . addIndices
+  where first f = Seq.take 1 . Seq.filter f
 
-triangulate :: (Fractional a, Ord a, Show a) => V.Vector (V2 a) -> [Int]
-triangulate vertices =
-  let go ears vMap
-        | not (V.null ears) =
-          let (i,_) = V.head ears
-              n0 = head $ (filter (< i) $ reverse $ IntMap.keys vMap) <>
-                          (filter (> i) $ reverse $ IntMap.keys vMap)
-              n1 = i
-              n2 = head $ (filter (> i) $ IntMap.keys vMap) <>
-                          (filter (< i) $ IntMap.keys vMap)
-              vRem = IntMap.delete n1 vMap
-          in [n0,n1,n2] <>
-             go (earsOn snd $ V.fromList $ IntMap.toList vRem)
-                vRem
-        | otherwise = []
-      indexedVs = V.imap (\i v -> (i,v)) vertices
-  in go (earsOn snd indexedVs)
-        (IntMap.fromList $ V.toList indexedVs)
+        isEar ((_,a),(_,b),(_,c),otherVertices) =
+          let area = triangleArea a b c
+              containsOther =
+                any (pointInTriangle a b c . snd)
+                    otherVertices
+          in area > 0 && not containsOther
+
+        go s
+          | Seq.length s < 3 = empty
+          | otherwise =
+            do (v0@(n0,_),v1@(n1,_),v2@(n2,_),others) <- first isEar (separate s)
+               (n0,n1,n2) Seq.<|
+                 go (v0 Seq.<| v2 Seq.<| others)
+
+        addIndices vertices =
+          Seq.zip (Seq.fromList [0 .. Seq.length vertices]) vertices
+
+        separate vertices =
+          let n = Seq.length vertices
+              doubleVerts = vertices <> vertices
+          in Seq.zip4 vertices
+                      (Seq.drop 1 doubleVerts)
+                      (Seq.drop 2 verticedoubleVerts)
+                      (Seq.mapWithIndex
+                         (\i _ ->
+                            Seq.take (n - 3) $
+                            Seq.drop (i + 3) $
+                            doubleVerts)
+                         vertices)
 
 realiseSector :: Sector -> IO (IO ())
 realiseSector sectorVertices = do
@@ -154,7 +151,7 @@ realiseSector sectorVertices = do
 
       floorIndices =
         let n = fromIntegral $ V.length wallVertices
-        in V.fromList $ map (fromIntegral . (+ n)) (triangulate sectorVertices)
+        in V.fromList $ map (fromIntegral . (+ n)) $ concatMap (\(a, b, c) -> [a, b, c]) $ toList $ triangulate $ Seq.fromList $ V.toList $ sectorVertices
 
       ceilingIndices = V.map (+ (fromIntegral $ V.length floorVertices)) floorIndices
 
@@ -361,6 +358,6 @@ keyHeld scancode =
 hasScancode :: [SDL.Event] -> SDL.Scancode -> Bool
 events `hasScancode` s =
   case events of
-    [] -> False
     (SDL.KeyboardEvent _ _ _ _ _ (SDL.Keysym scancode _ _)) : xs -> scancode == s || xs `hasScancode` s
     _ : xs -> xs `hasScancode` s
+    [] -> False
