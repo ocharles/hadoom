@@ -10,10 +10,9 @@ import Control.Arrow
 import Control.Category
 import Control.Applicative
 import Control.Lens hiding (indices)
-import Control.Monad (mzero)
 import Control.Monad.Fix (MonadFix)
 import Data.Distributive (distribute)
-import Data.Foldable (any, toList)
+import Data.Foldable (any)
 import Data.Int (Int32)
 import Data.Monoid ((<>))
 import Foreign.C (CFloat, withCString)
@@ -34,8 +33,6 @@ import qualified Graphics.UI.SDL.Enum as SDL
 import qualified Graphics.UI.SDL.Event as SDL
 import qualified Graphics.UI.SDL.Types as SDL
 import qualified Graphics.UI.SDL.Video as SDL
-
-import qualified Data.Sequence as Seq
 
 import qualified FRP
 
@@ -73,9 +70,9 @@ pointInTriangle p0@(V2 p0x p0y) p1@(V2 p1x p1y) p2@(V2 p2x p2y) (V2 px py) =
 poly :: V.Vector (V2 CFloat)
 poly = [ V2 0 0, V2 10 0, V2 10 5, V2 5 2, V2 0 5 ]
 
-triangulate :: (Fractional a, Ord a) => Seq.Seq (V2 a) -> Seq.Seq (Int, Int, Int)
+triangulate :: (Fractional a, Ord a) => V.Vector (V2 a) -> V.Vector Int
 triangulate = go . addIndices
-  where first f = Seq.take 1 . Seq.filter f
+  where takeFirst f = V.take 1 . V.filter f
 
         isEar ((_,a),(_,b),(_,c),otherVertices) =
           let area = triangleArea a b c
@@ -85,27 +82,25 @@ triangulate = go . addIndices
           in area > 0 && not containsOther
 
         go s
-          | Seq.length s < 3 = empty
+          | V.length s < 3 = empty
           | otherwise =
-            do (v0@(n0,_),v1@(n1,_),v2@(n2,_),others) <- first isEar (separate s)
-               (n0,n1,n2) Seq.<|
-                 go (v0 Seq.<| v2 Seq.<| others)
+            do (v0@(n0,_),(n1,_),v2@(n2,_),others) <- takeFirst isEar (separate s)
+               [n0,n1,n2] <> go (v0 `V.cons` (v2 `V.cons` others))
 
         addIndices vertices =
-          Seq.zip (Seq.fromList [0 .. Seq.length vertices]) vertices
+          V.zip [0 .. V.length vertices] vertices
 
         separate vertices =
-          let n = Seq.length vertices
+          let n = V.length vertices
               doubleVerts = vertices <> vertices
-          in Seq.zip4 vertices
-                      (Seq.drop 1 doubleVerts)
-                      (Seq.drop 2 verticedoubleVerts)
-                      (Seq.mapWithIndex
-                         (\i _ ->
-                            Seq.take (n - 3) $
-                            Seq.drop (i + 3) $
-                            doubleVerts)
-                         vertices)
+          in V.zip4 vertices
+                    (V.drop 1 doubleVerts)
+                    (V.drop 2 doubleVerts)
+                    (V.imap (\i _ ->
+                               V.take (n - 3) $
+                               V.drop (i + 3) $
+                               doubleVerts)
+                            vertices)
 
 realiseSector :: Sector -> IO (IO ())
 realiseSector sectorVertices = do
@@ -151,7 +146,7 @@ realiseSector sectorVertices = do
 
       floorIndices =
         let n = fromIntegral $ V.length wallVertices
-        in V.fromList $ map (fromIntegral . (+ n)) $ concatMap (\(a, b, c) -> [a, b, c]) $ toList $ triangulate $ Seq.fromList $ V.toList $ sectorVertices
+        in fmap (fromIntegral . (+ n)) $ triangulate sectorVertices
 
       ceilingIndices = V.map (+ (fromIntegral $ V.length floorVertices)) floorIndices
 
