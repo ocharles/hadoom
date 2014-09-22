@@ -34,6 +34,9 @@ instance Functor m => Profunctor (Out m) where
 --------------------------------------------------------------------------------
 data Wire m a b = Wire (Time -> a -> m (Out m a b))
 
+instance (Applicative m, Num b) => Num (Wire m a b) where
+  (+) = liftA2 (+)
+
 stepWire :: Time -> a -> Wire m a b -> m (Out m a b)
 stepWire t a (Wire w) = w t a
 

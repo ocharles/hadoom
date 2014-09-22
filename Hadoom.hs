@@ -67,9 +67,6 @@ pointInTriangle p0@(V2 p0x p0y) p1@(V2 p1x p1y) p2@(V2 p2x p2y) (V2 px py) =
       t = 1 / (2 * area) * (p0x * p1y - p0y * p1x + (p0y - p1y) * px + (p1x - p0x) * py)
   in s > 0 && t > 0 && (1 - s - t) > 0
 
-poly :: V.Vector (V2 CFloat)
-poly = [ V2 0 0, V2 10 0, V2 10 5, V2 5 2, V2 0 5 ]
-
 triangulate :: (Fractional a, Ord a) => V.Vector (V2 a) -> V.Vector Int
 triangulate = go . addIndices
   where takeFirst f = V.take 1 . V.filter f
@@ -317,9 +314,13 @@ createShaderProgram vertexShaderPath fragmentShaderPath = do
 camera :: FRP.Wire Identity [SDL.Event] (M44 CFloat)
 camera = proc events -> do
   goForward <- keyHeld SDL.scancodeUp -< events
-  turnRight <- keyHeld SDL.scancodeRight -< events
+  goBack <- keyHeld SDL.scancodeDown -< events
 
-  quat <- axisAngle (V3 0 1 0) <$> FRP.integralWhen -< (1, turnRight)
+  turnLeft <- keyHeld SDL.scancodeLeft -< events
+  turnRight <- keyHeld SDL.scancodeRight -< events
+  theta <- (FRP.integralWhen -< (-1, turnLeft)) + (FRP.integralWhen -< (1, turnRight))
+  let quat = axisAngle (V3 0 1 0) theta
+
   rec position <- if goForward
                    then FRP.integral -< over _x negate $ rotate quat (V3 0 0 1) * 2
                    else returnA -< position'
