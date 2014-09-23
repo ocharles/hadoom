@@ -63,8 +63,13 @@ instance Storable Vertex where
     poke (castPtr $ ptr `plusPtr` sizeOf p `plusPtr` sizeOf n) uv
 
 triangleArea :: Fractional a => V2 a -> V2 a -> V2 a -> a
-triangleArea (V2 p0x p0y) (V2 p1x p1y) (V2 p2x p2y) =
-  0.5 * ((negate p1y) * p2x + p0y * ((negate p1x) + p2x) + p0x * (p1y - p2y) + p1x * p2y)
+triangleArea a b c =
+  let toV3 (V2 x y) = V3 x y 1
+      det =
+        det33 (V3 (toV3 a)
+                  (toV3 b)
+                  (toV3 c))
+  in 0.5 * det
 
 pointInTriangle :: (Fractional a, Ord a) => V2 a -> V2 a -> V2 a -> V2 a -> Bool
 pointInTriangle p0@(V2 p0x p0y) p1@(V2 p1x p1y) p2@(V2 p2x p2y) (V2 px py) =
@@ -410,9 +415,13 @@ keyPressed scancode = proc events -> do
   returnA -< pressed
 
 keyReleased :: (Applicative m, MonadFix m) => SDL.Scancode -> FRP.Wire m [SDL.Event] Bool
-keyReleased scancode = proc events -> do
-  rec released <- FRP.delay False -< released || (filter ((== SDL.eventTypeKeyUp) . SDL.eventType) events `hasScancode` scancode)
-  returnA -< released
+keyReleased scancode =
+  proc events ->
+  do rec released <- FRP.delay False -<
+                       released ||
+                         (filter ((== SDL.eventTypeKeyUp) . SDL.eventType) events
+                            `hasScancode` scancode)
+     returnA -< released
 
 keyHeld :: (Applicative m, MonadFix m) => SDL.Scancode -> FRP.Wire m [SDL.Event] Bool
 keyHeld scancode =
