@@ -19,6 +19,7 @@ import Foreign.C (CFloat, withCString)
 import Foreign (Ptr, Storable(..), alloca, castPtr, nullPtr, plusPtr, with)
 import Graphics.Rendering.OpenGL (($=))
 import Linear as L
+import Data.Time (UTCTime, getCurrentTime, diffUTCTime)
 
 import qualified Codec.Picture as JP
 import qualified Codec.Picture.Types as JP
@@ -292,10 +293,13 @@ main =
 
     wall1 <- loadTexture "wall.jpg"
     wall2 <- loadTexture "wall-2.jpg"
+
+    t0 <- getCurrentTime
     gameLoop win shaderProg (do GL.textureBinding GL.Texture2D $= Just wall1
                                 drawSector1
                                 GL.textureBinding GL.Texture2D $= Just wall2
                                 drawSector2) camera
+             t0
 
 loadTexture :: FilePath -> IO GL.TextureObject
 loadTexture path =
@@ -325,12 +329,16 @@ loadTexture path =
        Left e -> error e
        _ -> error "Unknown image format"
 
-gameLoop :: SDL.Window -> GL.Program -> IO a -> FRP.Wire Identity [SDL.Event] (M44 CFloat) -> IO b
-gameLoop win shaderProg drawSector w = do
+gameLoop :: SDL.Window -> GL.Program -> IO a -> FRP.Wire Identity [SDL.Event] (M44 CFloat) -> UTCTime -> IO b
+gameLoop win shaderProg drawSector w currentTime = do
+  newTime <- getCurrentTime
+  let frameTime = newTime `diffUTCTime` currentTime
+
   GL.clear [GL.ColorBuffer, GL.DepthBuffer]
 
   events <- unfoldEvents
-  let FRP.Out viewMat w' = runIdentity $ FRP.stepWire 0.005 events w
+  let FRP.Out viewMat w' = runIdentity $
+        FRP.stepWire (realToFrac frameTime) events w
 
   with (distribute viewMat) $ \ptr -> do
     GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "view")
@@ -345,7 +353,7 @@ gameLoop win shaderProg drawSector w = do
 
   SDL.glSwapWindow win
 
-  gameLoop win shaderProg drawSector w'
+  gameLoop win shaderProg drawSector w' newTime
 
 unfoldEvents :: IO [SDL.Event]
 unfoldEvents = alloca $ \evtPtr -> do
@@ -396,11 +404,11 @@ camera = proc events -> do
 
   turnLeft <- keyHeld SDL.scancodeLeft -< events
   turnRight <- keyHeld SDL.scancodeRight -< events
-  theta <- (FRP.integralWhen -< (-1, turnLeft)) + (FRP.integralWhen -< (1, turnRight))
+  theta <- (FRP.integralWhen -< (-2, turnLeft)) + (FRP.integralWhen -< (2, turnRight))
   let quat = axisAngle (V3 0 1 0) theta
 
   rec position <- if goForward
-                   then FRP.integral -< over _x negate $ rotate quat (V3 0 0 1) * 2
+                   then FRP.integral -< over _x negate $ rotate quat (V3 0 0 1) * 5
                    else returnA -< position'
       position' <- FRP.delay 0 -< position
 
