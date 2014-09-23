@@ -1,15 +1,28 @@
-#version 130
+#version 330
 
 out vec4 fragColor;
 
 in vec3 norm;
 in vec3 worldPos;
+in vec2 texCoord;
 
-uniform vec3 lightPos;
+struct LightInfo {
+  vec3 lightPos;
+  vec3 lightColor;
+};
 
 uniform sampler2D tex;
 
+layout(std140) uniform Light {
+	LightInfo Lights[2];
+};
+
 void main(void) {
-  vec3 dir = lightPos - worldPos;
-  fragColor = (vec4(0.2) + texture2D(tex, gl_TexCoord[0].xy)) * clamp(dot(norm, dir), 1, 1) * 750 / pow(length(dir), 1.8);
+  for(int i = 0; i < 2; i++) {
+    LightInfo light = Lights[i];
+    vec3 dir = light.lightPos - worldPos;
+    float d = length(dir);
+    vec3 l = dir / d;
+    fragColor += vec4(texture2D(tex, texCoord).rgb * light.lightColor * clamp(dot(norm, l), 0, 1) / (d * d), 1);
+  }
 }

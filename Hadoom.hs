@@ -20,6 +20,7 @@ import Foreign (Ptr, Storable(..), alloca, castPtr, nullPtr, plusPtr, with)
 import Graphics.Rendering.OpenGL (($=))
 import Linear as L
 import Data.Time (UTCTime, getCurrentTime, diffUTCTime)
+import Unsafe.Coerce (unsafeCoerce)
 
 import qualified Codec.Picture as JP
 import qualified Codec.Picture.Types as JP
@@ -257,8 +258,23 @@ realiseSector Sector{..} =
                 (V.length wallIndices + V.length floorIndices)))
 
 
-triangleTranslation :: Floating a => M44 a
-triangleTranslation = eye4 & translation .~ V3 0 0 (-5)
+data Light =
+  Light {lightPos :: V3 CFloat
+        ,lightColor :: V3 CFloat}
+
+instance Storable Light where
+  sizeOf ~(Light pos col) = 2 * sizeOf (undefined :: V4 CFloat)
+  alignment _ = 0
+  peek ptr =
+    Light <$>
+    peek (castPtr ptr) <*>
+    peek (castPtr ptr `plusPtr`
+          fromIntegral (sizeOf (undefined :: V4 CFloat)))
+  poke ptr (Light pos col) =
+    do poke (castPtr ptr) pos
+       poke (castPtr $ ptr `plusPtr`
+             fromIntegral (sizeOf (undefined :: V4 CFloat)))
+            col
 
 main :: IO ()
 main =
@@ -341,12 +357,36 @@ main =
 
     GL.depthFunc $= Just GL.Less
 
+
+    let lights = [ Light { lightPos = V3 0 15 0, lightColor = V3 500 0 0 }
+                 , Light { lightPos = V3 0 15 70, lightColor = V3 0 500 0 }
+                 ]
+
+    lightsUBO <- GL.genObjectName
+
+    shaderId <- unsafeCoerce shaderProg
+    lightsUBI <- withCString "light" $ GL.glGetUniformBlockIndex shaderId
+    print lightsUBI
+    GL.get GL.errors >>= mapM_ print
+
+    GL.glUniformBlockBinding shaderId lightsUBI 0
+
+    GL.bindBufferRange GL.IndexedUniformBuffer 0 $= Just (lightsUBO, 0, fromIntegral (sizeOf (undefined :: Light) * 2))
+
+    GL.bindBuffer GL.UniformBuffer $= Just lightsUBO
+
     t0 <- getCurrentTime
     gameLoop win shaderProg (do GL.textureBinding GL.Texture2D $= Just wall1
                                 drawSector1
                                 GL.textureBinding GL.Texture2D $= Just wall2
                                 drawSector2) camera
              t0
+             (\viewMat -> do
+                 let lights' = flip SV.map lights $ \(Light (V3 x y z) col) ->
+                       Light ((viewMat !* V4 x y z 1) ^. _xyz) col
+                 SV.unsafeWith lights' $ \ptr -> do
+                   GL.bufferData GL.UniformBuffer $= (fromIntegral (sizeOf (undefined :: Light) * 2), ptr, GL.StreamDraw)
+                 )
 
 loadTexture :: FilePath -> IO GL.TextureObject
 loadTexture path =
@@ -376,8 +416,7 @@ loadTexture path =
        Left e -> error e
        _ -> error "Unknown image format"
 
-gameLoop :: SDL.Window -> GL.Program -> IO a -> FRP.Wire Identity [SDL.Event] (M44 CFloat) -> UTCTime -> IO b
-gameLoop win shaderProg drawSector w currentTime = do
+gameLoop win shaderProg drawSector w currentTime viewMatF= do
   newTime <- getCurrentTime
   let frameTime = newTime `diffUTCTime` currentTime
 
@@ -391,16 +430,18 @@ gameLoop win shaderProg drawSector w currentTime = do
     GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "view")
     GL.glUniformMatrix4fv loc 1 0 (castPtr (ptr :: Ptr (M44 CFloat)))
 
-  let lightPos = (viewMat !* (V4 0.5 0.5 0 1)) ^. _xyz
-  with lightPos $ \ptr -> do
-    GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "lightPos")
-    GL.glUniform3fv loc 1 (castPtr ptr)
+  viewMatF viewMat
+
+  -- let lightPos = (viewMat !* (V4 0 15 0 1)) ^. _xyz
+  -- with lightPos $ \ptr -> do
+  --   GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "lightPos")
+  --   GL.glUniform3fv loc 1 (castPtr ptr)
 
   _ <- drawSector
 
   SDL.glSwapWindow win
 
-  gameLoop win shaderProg drawSector w' newTime
+  gameLoop win shaderProg drawSector w' newTime viewMatF
 
 unfoldEvents :: IO [SDL.Event]
 unfoldEvents = alloca $ \evtPtr -> do
@@ -443,6 +484,7 @@ createShaderProgram vertexShaderPath fragmentShaderPath = do
     src <- getDataFileName path >>= Text.readFile
     GL.shaderSourceBS shader $= Text.encodeUtf8 src
     GL.compileShader shader
+    GL.get (GL.shaderInfoLog shader) >>= putStrLn
 
 camera :: FRP.Wire Identity [SDL.Event] (M44 CFloat)
 camera = proc events -> do
