@@ -44,7 +44,10 @@ data Sector =
   Sector {sectorVertices :: IM.IntMap (V2 CFloat)
          ,sectorWalls :: V.Vector (Int,Int)
          ,sectorFloor :: CFloat
-         ,sectorCeiling :: CFloat}
+         ,sectorCeiling :: CFloat
+         ,sectorFloorTexture :: GL.TextureObject
+         ,sectorCeilingTexture :: GL.TextureObject
+         ,sectorWallTexture :: GL.TextureObject}
 
 data Vertex =
   Vertex {vPos :: {-# UNPACK #-} !(V3 CFloat)
@@ -226,10 +229,33 @@ realiseSector Sector{..} =
 
      return $
        do GL.bindVertexArrayObject $= Just vao
+
+          GL.textureBinding GL.Texture2D $= Just sectorWallTexture
           GL.drawElements GL.Triangles
-                          (fromIntegral $ V.length indices)
+                          (fromIntegral $ V.length wallIndices)
                           GL.UnsignedInt
                           nullPtr
+
+          GL.textureBinding GL.Texture2D $= Just sectorFloorTexture
+          GL.drawElements
+            GL.Triangles
+            (fromIntegral $ V.length floorIndices)
+            GL.UnsignedInt
+            (nullPtr `plusPtr`
+             fromIntegral
+               (sizeOf (0 :: Int32) *
+                V.length wallIndices))
+
+          GL.textureBinding GL.Texture2D $= Just sectorCeilingTexture
+          GL.drawElements
+            GL.Triangles
+            (fromIntegral $ V.length ceilingIndices)
+            GL.UnsignedInt
+            (nullPtr `plusPtr`
+             fromIntegral
+               (sizeOf (0 :: Int32) *
+                (V.length wallIndices + V.length floorIndices)))
+
 
 triangleTranslation :: Floating a => M44 a
 triangleTranslation = eye4 & translation .~ V3 0 0 (-5)
@@ -245,27 +271,51 @@ main =
     GL.clearColor $= GL.Color4 0.5 0.5 0.5 1
     GL.cullFace $= Just GL.Back
 
+    wall1 <- loadTexture "wall.jpg"
+    wall2 <- loadTexture "wall-2.jpg"
+    ceiling <- loadTexture "ceiling.jpg"
+    floor <- loadTexture "floor.jpg"
+
     drawSector1 <-
-      let vertices = IM.fromList $ zip [0 ..] [V2 (-50) (-50) ,V2 (-30) (-50)
-                                              ,V2 (-30) (-30) ,V2 10 (-30)
-                                              ,V2 10 (-50) ,V2 50 (-50)
-                                              ,V2 50 50 ,V2 30 50 ,V2 30 60
-                                              ,V2 10 60 ,V2 (-10) 60
-                                              ,V2 (-40) 60 ,V2 (-40) 50
+      let vertices = IM.fromList $ zip [0 ..] [V2 (-50) (-50)
+                                              ,V2 (-30) (-50)
+                                              ,V2 (-30) (-30)
+                                              ,V2 10 (-30)
+                                              ,V2 10 (-50)
+                                              ,V2 50 (-50)
+                                              ,V2 50 50
+                                              ,V2 30 50
+                                              ,V2 30 60
+                                              ,V2 10 60
+                                              ,V2 10 61
+                                              ,V2 (-10) 61
+                                              ,V2 (-10) 60
+                                              ,V2 (-40) 60
+                                              ,V2 (-40) 50
                                               ,V2 (-50) 50]
       in realiseSector Sector {sectorVertices = vertices
-                              ,sectorCeiling = 20
+                              ,sectorCeiling = 30
                               ,sectorFloor = 0
                               ,sectorWalls = [(0,1),(1,2),(2,3),(3,4),(4,5)
-                                             ,(5,6),(6,7),(7,8),(8,9)
-                                             ,(10,11),(11,12),(12,0)]}
+                                             ,(5,6),(6,7),(7,8),(8,9),(9,10)
+                                             ,(11,12),(12,13),(13,14),(14,0)]
+                              ,sectorFloorTexture = floor
+                              ,sectorCeilingTexture = ceiling
+                              ,sectorWallTexture = wall1}
     drawSector2 <-
-      let vertices = IM.fromList $ zip [0 ..] [V2 (-30) 60,V2 (-10) 60,V2 10 60
-                                              ,V2 30 60,V2 30 100,V2 (-30) 100]
+      let vertices = IM.fromList $ zip [0 ..] [V2 (-30) 61
+                                              ,V2 (-10) 61
+                                              ,V2 10 61
+                                              ,V2 30 61
+                                              ,V2 30 100
+                                              ,V2 (-30) 100]
       in realiseSector Sector {sectorVertices = vertices
-                              ,sectorCeiling = 20
+                              ,sectorCeiling = 30
                               ,sectorFloor = 0
-                              ,sectorWalls = [(0,1),(2,3),(3,4),(4,5),(5,0)]}
+                              ,sectorWalls = [(0,1),(2,3),(3,4),(4,5),(5,0)]
+                              ,sectorFloorTexture = floor
+                              ,sectorCeilingTexture = ceiling
+                              ,sectorWallTexture = wall2}
 
     shaderProg <- createShaderProgram "shaders/vertex/projection-model.glsl"
                                       "shaders/fragment/solid-white.glsl"
@@ -290,9 +340,6 @@ main =
        GL.glUniform1i loc 0
 
     GL.depthFunc $= Just GL.Less
-
-    wall1 <- loadTexture "wall.jpg"
-    wall2 <- loadTexture "wall-2.jpg"
 
     t0 <- getCurrentTime
     gameLoop win shaderProg (do GL.textureBinding GL.Texture2D $= Just wall1
@@ -408,7 +455,7 @@ camera = proc events -> do
   let quat = axisAngle (V3 0 1 0) theta
 
   rec position <- if goForward
-                   then FRP.integral -< over _x negate $ rotate quat (V3 0 0 1) * 5
+                   then FRP.integral -< over _x negate $ rotate quat (V3 0 0 1) * 10
                    else returnA -< position'
       position' <- FRP.delay 0 -< position
 
