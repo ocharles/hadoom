@@ -393,26 +393,33 @@ loadTexture path =
   do x <- JP.readImage path
      case x of
        Right (JP.ImageYCbCr8 img) ->
-         do GL.activeTexture $= GL.TextureUnit 0
+         do GL.activeTexture $=
+              GL.TextureUnit 0
             t <- GL.genObjectName
-            GL.textureBinding GL.Texture2D $= Just t
-            GL.textureFilter GL.Texture2D $= ((GL.Linear',Nothing),GL.Linear')
-            let toRgb8 = JP.convertPixel :: JP.PixelYCbCr8 -> JP.PixelRGB8
-                toRgbF = JP.promotePixel :: JP.PixelRGB8 -> JP.PixelRGBF
-            case JP.pixelMap (toRgbF . toRgb8) img of
+            GL.textureBinding GL.Texture2D $=
+              Just t
+            GL.textureFilter GL.Texture2D $=
+              ((GL.Linear',Just GL.Linear'),GL.Linear')
+            let toRgb8 =
+                  JP.convertPixel :: JP.PixelYCbCr8 -> JP.PixelRGB8
+                toRgbF =
+                  JP.promotePixel :: JP.PixelRGB8 -> JP.PixelRGBF
+            case JP.pixelMap (toRgbF . toRgb8)
+                             img of
               JP.Image w h d ->
-                SV.unsafeWith d $
-                \ptr ->
-                  do GL.texImage2D
-                       GL.Texture2D
-                       GL.NoProxy
-                       0
-                       GL.RGB32F
-                       (GL.TextureSize2D (fromIntegral w)
-                                         (fromIntegral h))
-                       0
-                       (GL.PixelData GL.RGB GL.Float ptr)
-                     return t
+                do SV.unsafeWith d $
+                     \ptr ->
+                       GL.texImage2D
+                         GL.Texture2D
+                         GL.NoProxy
+                         0
+                         GL.RGB32F
+                         (GL.TextureSize2D (fromIntegral w)
+                                           (fromIntegral h))
+                         0
+                         (GL.PixelData GL.RGB GL.Float ptr)
+                   GL.generateMipmap' GL.Texture2D
+                   return t
        Left e -> error e
        _ -> error "Unknown image format"
 
