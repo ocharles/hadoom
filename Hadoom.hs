@@ -281,7 +281,7 @@ main =
   alloca $ \winPtr ->
   alloca $ \rendererPtr -> do
     _ <- SDL.init SDL.initFlagEverything
-    _ <- SDL.createWindowAndRenderer 800 600 0 winPtr rendererPtr
+    _ <- SDL.createWindowAndRenderer 1280 1024 0 winPtr rendererPtr
     win <- peek winPtr
     withCString "Hadoom" $ SDL.setWindowTitle win
     GL.clearColor $= GL.Color4 0.5 0.5 0.5 1
