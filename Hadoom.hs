@@ -501,7 +501,7 @@ data Scene =
 scene :: FRP.Wire Identity [SDL.Event] Scene
 scene = Scene <$> camera
               <*> (FRP.time <&> \t -> [ Light (V3 0 15 0) (V3 ((1 + realToFrac (sin t)) / 2) 1 0) (100 * realToFrac (1 + sin (t * 2)))
-                                     , Light (V3 0 15 70) 1 1000])
+                                      , Light (V3 0 15 70) 1 (if sin (t * 10) > 0 then 1000 else 0)])
 
 camera :: FRP.Wire Identity [SDL.Event] (M44 CFloat)
 camera = proc events -> do
