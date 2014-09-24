@@ -19,7 +19,7 @@ import Foreign.C (CFloat, withCString)
 import Foreign (Ptr, Storable(..), alloca, castPtr, nullPtr, plusPtr, with)
 import Graphics.Rendering.OpenGL (($=))
 import Linear as L
-import Data.Time (UTCTime, getCurrentTime, diffUTCTime)
+import Data.Time (getCurrentTime, diffUTCTime)
 import Unsafe.Coerce (unsafeCoerce)
 
 import qualified Codec.Picture as JP
@@ -260,21 +260,35 @@ realiseSector Sector{..} =
 
 data Light =
   Light {lightPos :: V3 CFloat
-        ,lightColor :: V3 CFloat}
+        ,lightColor :: V3 CFloat
+        ,lightRadius :: CFloat}
+  deriving (Show)
+
 
 instance Storable Light where
-  sizeOf ~(Light pos col) = 2 * sizeOf (undefined :: V4 CFloat)
-  alignment _ = 0
+  sizeOf _ =
+    sizeOf (undefined :: V4 CFloat) *
+    2
+  alignment _ = sizeOf (undefined :: V4 CFloat)
   peek ptr =
     Light <$>
     peek (castPtr ptr) <*>
     peek (castPtr ptr `plusPtr`
-          fromIntegral (sizeOf (undefined :: V4 CFloat)))
-  poke ptr (Light pos col) =
+          fromIntegral (sizeOf (undefined :: V4 CFloat))) <*>
+    peek (castPtr ptr `plusPtr`
+          fromIntegral
+            (sizeOf (undefined :: V4 CFloat) +
+             sizeOf (undefined :: V3 CFloat)))
+  poke ptr (Light pos col r) =
     do poke (castPtr ptr) pos
        poke (castPtr $ ptr `plusPtr`
              fromIntegral (sizeOf (undefined :: V4 CFloat)))
             col
+       poke (castPtr $ ptr `plusPtr`
+             fromIntegral
+               (sizeOf (undefined :: V4 CFloat) +
+                sizeOf (undefined :: V3 CFloat)))
+            r
 
 main :: IO ()
 main =
@@ -357,21 +371,14 @@ main =
 
     GL.depthFunc $= Just GL.Less
 
-
-    let lights = [ Light { lightPos = V3 0 15 0, lightColor = V3 500 0 0 }
-                 , Light { lightPos = V3 0 15 70, lightColor = V3 0 500 0 }
-                 ]
-
     lightsUBO <- GL.genObjectName
 
     shaderId <- unsafeCoerce shaderProg
     lightsUBI <- withCString "light" $ GL.glGetUniformBlockIndex shaderId
-    print lightsUBI
-    GL.get GL.errors >>= mapM_ print
 
     GL.glUniformBlockBinding shaderId lightsUBI 0
 
-    GL.bindBufferRange GL.IndexedUniformBuffer 0 $= Just (lightsUBO, 0, fromIntegral (sizeOf (undefined :: Light) * 2))
+    GL.bindBufferRange GL.IndexedUniformBuffer 0 $= Just (lightsUBO, 0, fromIntegral (sizeOf (undefined :: Light) * 1))
 
     GL.bindBuffer GL.UniformBuffer $= Just lightsUBO
 
@@ -379,14 +386,8 @@ main =
     gameLoop win shaderProg (do GL.textureBinding GL.Texture2D $= Just wall1
                                 drawSector1
                                 GL.textureBinding GL.Texture2D $= Just wall2
-                                drawSector2) camera
+                                drawSector2) scene
              t0
-             (\viewMat -> do
-                 let lights' = flip SV.map lights $ \(Light (V3 x y z) col) ->
-                       Light ((viewMat !* V4 x y z 1) ^. _xyz) col
-                 SV.unsafeWith lights' $ \ptr -> do
-                   GL.bufferData GL.UniformBuffer $= (fromIntegral (sizeOf (undefined :: Light) * 2), ptr, GL.StreamDraw)
-                 )
 
 loadTexture :: FilePath -> IO GL.TextureObject
 loadTexture path =
@@ -419,36 +420,36 @@ loadTexture path =
                          0
                          (GL.PixelData GL.RGB GL.Float ptr)
                    GL.generateMipmap' GL.Texture2D
+                   GL.get GL.maxTextureMaxAnisotropy >>= print
+                   GL.textureMaxAnisotropy GL.Texture2D $= 16
                    return t
        Left e -> error e
        _ -> error "Unknown image format"
 
-gameLoop win shaderProg drawSector w currentTime viewMatF= do
+gameLoop win shaderProg drawSector w currentTime = do
   newTime <- getCurrentTime
   let frameTime = newTime `diffUTCTime` currentTime
 
   GL.clear [GL.ColorBuffer, GL.DepthBuffer]
 
   events <- unfoldEvents
-  let FRP.Out viewMat w' = runIdentity $
+  let FRP.Out (Scene viewMat lights) w' = runIdentity $
         FRP.stepWire (realToFrac frameTime) events w
 
   with (distribute viewMat) $ \ptr -> do
     GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "view")
     GL.glUniformMatrix4fv loc 1 0 (castPtr (ptr :: Ptr (M44 CFloat)))
 
-  viewMatF viewMat
-
-  -- let lightPos = (viewMat !* (V4 0 15 0 1)) ^. _xyz
-  -- with lightPos $ \ptr -> do
-  --   GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "lightPos")
-  --   GL.glUniform3fv loc 1 (castPtr ptr)
+  let lights' = flip SV.map lights $ \(Light (V3 x y z) col r) ->
+        Light ((viewMat !* V4 x y z 1) ^. _xyz) col r
+  SV.unsafeWith lights' $ \ptr -> do
+    GL.bufferData GL.UniformBuffer $= (fromIntegral (sizeOf (undefined :: Light) * SV.length lights'), ptr, GL.StreamDraw)
 
   _ <- drawSector
 
   SDL.glSwapWindow win
 
-  gameLoop win shaderProg drawSector w' newTime viewMatF
+  gameLoop win shaderProg drawSector w' newTime
 
 unfoldEvents :: IO [SDL.Event]
 unfoldEvents = alloca $ \evtPtr -> do
@@ -492,6 +493,15 @@ createShaderProgram vertexShaderPath fragmentShaderPath = do
     GL.shaderSourceBS shader $= Text.encodeUtf8 src
     GL.compileShader shader
     GL.get (GL.shaderInfoLog shader) >>= putStrLn
+
+data Scene =
+  Scene {sceneCamera :: M44 CFloat
+        ,sceneLights :: SV.Vector Light}
+
+scene :: FRP.Wire Identity [SDL.Event] Scene
+scene = Scene <$> camera
+              <*> (FRP.time <&> \t -> [ Light (V3 0 15 0) (V3 ((1 + realToFrac (sin t)) / 2) 1 0) (100 * realToFrac (1 + sin (t * 2)))
+                                     , Light (V3 0 15 70) 1 1000])
 
 camera :: FRP.Wire Identity [SDL.Event] (M44 CFloat)
 camera = proc events -> do
