@@ -17,8 +17,8 @@ import Data.Function (fix)
 import Data.Int (Int32)
 import Data.Monoid ((<>))
 import Data.Time (getCurrentTime, diffUTCTime)
-import Foreign.C (CFloat, withCString)
 import Foreign (Ptr, Storable(..), alloca, castPtr, nullPtr, plusPtr, with)
+import Foreign.C (CFloat, withCString)
 import Graphics.Rendering.OpenGL (($=))
 import Linear as L
 import Unsafe.Coerce (unsafeCoerce)
@@ -42,18 +42,24 @@ import qualified FRP
 
 import Paths_hadoom
 
+data Material =
+  Material {matDiffuse :: GL.TextureObject
+           ,matNormalMap :: GL.TextureObject}
+
 data Sector =
   Sector {sectorVertices :: IM.IntMap (V2 CFloat)
          ,sectorWalls :: V.Vector (Int,Int)
          ,sectorFloor :: CFloat
          ,sectorCeiling :: CFloat
-         ,sectorFloorTexture :: GL.TextureObject
-         ,sectorCeilingTexture :: GL.TextureObject
-         ,sectorWallTexture :: GL.TextureObject}
+         ,sectorFloorMaterial :: Material
+         ,sectorCeilingMaterial :: Material
+         ,sectorWallMaterial :: Material}
 
 data Vertex =
   Vertex {vPos :: {-# UNPACK #-} !(V3 CFloat)
          ,vNorm :: {-# UNPACK #-} !(V3 CFloat)
+         ,vTangent :: {-# UNPACK #-} !(V3 CFloat)
+         ,vBitangent :: {-# UNPACK #-} !(V3 CFloat)
          ,vUV :: {-# UNPACK #-} !(V2 CFloat)}
   deriving (Show)
 
@@ -61,12 +67,13 @@ data SectorRenderer =
   SectorRenderer {srDrawWalls :: IO ()
                  ,srDrawFloor :: IO ()
                  ,srDrawCeiling :: IO ()
-                 ,srFloorTexture :: GL.TextureObject
-                 ,srCeilingTexture :: GL.TextureObject
-                 ,srWallTexture :: GL.TextureObject}
+                 ,srFloorMaterial :: Material
+                 ,srCeilingMaterial :: Material
+                 ,srWallMaterial :: Material}
 
 instance Storable Vertex where
-  sizeOf ~(Vertex p n uv) = sizeOf p + sizeOf n + sizeOf uv
+  sizeOf ~(Vertex p n t bn uv) = sizeOf p + sizeOf n + sizeOf t + sizeOf bn +
+                                 sizeOf uv
   alignment _ = 0
   peek ptr =
     Vertex <$>
@@ -75,11 +82,26 @@ instance Storable Vertex where
           sizeOf (vPos undefined)) <*>
     peek (castPtr $ ptr `plusPtr`
           sizeOf (vPos undefined) `plusPtr`
-          sizeOf (vNorm undefined))
-  poke ptr (Vertex p n uv) =
+          sizeOf (vNorm undefined)) <*>
+    peek (castPtr $ ptr `plusPtr`
+          sizeOf (vPos undefined) `plusPtr`
+          sizeOf (vNorm undefined) `plusPtr`
+          sizeOf (vTangent undefined)) <*>
+    peek (castPtr $ ptr `plusPtr`
+          sizeOf (vPos undefined) `plusPtr`
+          sizeOf (vNorm undefined) `plusPtr`
+          sizeOf (vTangent undefined) `plusPtr`
+          sizeOf (vBitangent undefined))
+  poke ptr (Vertex p n t bn uv) =
     do poke (castPtr $ ptr) p
        poke (castPtr $ ptr `plusPtr` sizeOf p) n
-       poke (castPtr $ ptr `plusPtr` sizeOf p `plusPtr` sizeOf n) uv
+       poke (castPtr $ ptr `plusPtr` sizeOf p `plusPtr` sizeOf n) t
+       poke (castPtr $ ptr `plusPtr` sizeOf p `plusPtr` sizeOf n `plusPtr`
+             sizeOf t)
+            bn
+       poke (castPtr $ ptr `plusPtr` sizeOf p `plusPtr` sizeOf n `plusPtr`
+             sizeOf t `plusPtr` sizeOf bn)
+            uv
 
 triangleArea :: Fractional a => V2 a -> V2 a -> V2 a -> a
 triangleArea a b c =
@@ -166,9 +188,9 @@ realiseSector Sector{..} =
                                fromIntegral
                                  (sizeOf (0 :: Int32) *
                                   (V.length wallIndices + V.length floorIndices)))
-                      ,srWallTexture = sectorWallTexture
-                      ,srFloorTexture = sectorFloorTexture
-                      ,srCeilingTexture = sectorCeilingTexture}
+                      ,srWallMaterial = sectorWallMaterial
+                      ,srFloorMaterial = sectorFloorMaterial
+                      ,srCeilingMaterial = sectorCeilingMaterial}
   where initializeVAO =
           do vao <- GL.genObjectName :: IO (GL.VertexArrayObject)
              GL.bindVertexArrayObject $=
@@ -194,8 +216,14 @@ realiseSector Sector{..} =
                  normalOffset =
                    fromIntegral $
                    sizeOf (0 :: V3 CFloat)
-                 uvOffset =
+                 tangentOffset =
                    normalOffset +
+                   fromIntegral (sizeOf (0 :: V3 CFloat))
+                 bitangentOffset =
+                   tangentOffset +
+                   fromIntegral (sizeOf (0 :: V3 CFloat))
+                 uvOffset =
+                   bitangentOffset +
                    fromIntegral (sizeOf (0 :: V3 CFloat))
              GL.vertexAttribPointer positionAttribute $=
                (GL.ToFloat,GL.VertexArrayDescriptor 3 GL.Float stride nullPtr)
@@ -207,6 +235,20 @@ realiseSector Sector{..} =
                                          stride
                                          (nullPtr `plusPtr` normalOffset))
              GL.vertexAttribArray normalAttribute $= GL.Enabled
+             GL.vertexAttribPointer tangentAttribute $=
+               (GL.ToFloat
+               ,GL.VertexArrayDescriptor 3
+                                         GL.Float
+                                         stride
+                                         (nullPtr `plusPtr` tangentOffset))
+             GL.vertexAttribArray tangentAttribute $= GL.Enabled
+             GL.vertexAttribPointer bitangentAttribute $=
+               (GL.ToFloat
+               ,GL.VertexArrayDescriptor 3
+                                         GL.Float
+                                         stride
+                                         (nullPtr `plusPtr` bitangentOffset))
+             GL.vertexAttribArray bitangentAttribute $= GL.Enabled
              GL.vertexAttribPointer uvAttribute $=
                (GL.ToFloat
                ,GL.VertexArrayDescriptor 2
@@ -214,6 +256,7 @@ realiseSector Sector{..} =
                                          stride
                                          (nullPtr `plusPtr` uvOffset))
              GL.vertexAttribArray uvAttribute $= GL.Enabled
+        textureScaleFactor = 8.0e-2
         wallVertices =
           V.concatMap
             (\(s,e) ->
@@ -221,16 +264,27 @@ realiseSector Sector{..} =
                           (sectorVertices IM.! e))
             sectorWalls
           where expandEdge start@(V2 x1 y1) end@(V2 x2 y2) =
-                  let n =
-                        case normalize $ perp $ end ^-^ start of
+                  let wallV = end ^-^ start
+                      wallLen = norm wallV
+                      scaledLen = wallLen * textureScaleFactor
+                      n =
+                        case perp (wallV ^* recip wallLen) of
                           V2 x y -> V3 x 0 y
+                      v =
+                        (sectorCeiling - sectorFloor) *
+                        textureScaleFactor
                   in V.fromList $ getZipList $ Vertex <$>
                      ZipList [V3 x1 sectorFloor y1
                              ,V3 x1 sectorCeiling y1
                              ,V3 x2 sectorFloor y2
                              ,V3 x2 sectorCeiling y2] <*>
                      ZipList (repeat n) <*>
-                     ZipList [V2 0 0,V2 0 1,V2 1 0,V2 1 1]
+                     ZipList (repeat $
+                              case n of
+                                V3 x 0 y ->
+                                  V3 y 0 x) <*>
+                     ZipList (repeat $ V3 0 (-1) 0) <*>
+                     ZipList [V2 0 0,V2 0 1,V2 scaledLen 0,V2 scaledLen 1]
         wallIndices =
           V.concatMap id $
           V.imap (\m _ ->
@@ -241,13 +295,17 @@ realiseSector Sector{..} =
           V.map (\(V2 x y) ->
                    Vertex (V3 x sectorFloor y)
                           (V3 0 1 0)
+                          (V3 1 0 0)
+                          (V3 0 0 1)
                           (V2 x y ^*
-                           5.0e-2))
+                           textureScaleFactor))
                 (V.fromList $ IM.elems sectorVertices)
         ceilingVertices =
-          V.map (\(Vertex p n uv) ->
+          V.map (\(Vertex p n t bn uv) ->
                    Vertex (p & _y .~ sectorCeiling)
                           (negate n)
+                          t
+                          bn
                           uv)
                 floorVertices
         floorIndices =
@@ -286,6 +344,8 @@ data Light =
         ,lightRadius :: CFloat}
   deriving (Show)
 
+shadowMapResolution = 1024
+
 genLightDepthMap :: IO GL.TextureObject
 genLightDepthMap =
   do lightDepthMap <- GL.genObjectName
@@ -300,7 +360,7 @@ genLightDepthMap =
                    GL.NoProxy
                    0
                    GL.DepthComponent16
-                   (GL.TextureSize2D 512 512)
+                   (GL.TextureSize2D shadowMapResolution shadowMapResolution)
                    0
                    (GL.PixelData GL.DepthComponent GL.Float nullPtr)
      return lightDepthMap
@@ -349,10 +409,10 @@ main =
     withCString "Hadoom" $ SDL.setWindowTitle win
     GL.clearColor $= GL.Color4 0 0 0 1
 
-    wall1 <- loadTexture "wall.jpg"
-    wall2 <- loadTexture "wall-2.jpg"
-    ceiling <- loadTexture "ceiling.jpg"
-    floor <- loadTexture "floor.jpg"
+    wall1 <- Material <$> loadTexture "RoughBlockWall-ColorMap.jpg" <*> loadTexture "RoughBlockWall-NormalMap.jpg"
+    wall2 <- return wall1 -- Material <$> loadTexture "wall-2.jpg" <*> loadTexture "flat.jpg"
+    ceiling <- Material <$> loadTexture "CrustyConcrete-ColorMap.jpg" <*> loadTexture "CrustyConcrete-NormalMap.jpg"
+    floor <- Material <$> loadTexture "AfricanEbonyBoards-ColorMap.jpg" <*> loadTexture "AfricanEbonyBoards-NormalMap.jpg"
 
     sector1 <-
       let vertices = IM.fromList $ zip [0 ..] [V2 (-50) (-50)
@@ -377,9 +437,9 @@ main =
                               ,sectorWalls = [(0,1),(1,2),(2,3),(3,4),(4,5)
                                              ,(5,6),(6,7),(7,8),(8,9),(9,10)
                                              ,(11,12),(12,13),(13,14),(14,0)]
-                              ,sectorFloorTexture = floor
-                              ,sectorCeilingTexture = ceiling
-                              ,sectorWallTexture = wall1}
+                              ,sectorFloorMaterial = floor
+                              ,sectorCeilingMaterial = ceiling
+                              ,sectorWallMaterial = wall1}
     sector2 <-
       let vertices = IM.fromList $ zip [0 ..] [V2 (-30) 61
                                               ,V2 (-10) 61
@@ -391,9 +451,9 @@ main =
                               ,sectorCeiling = 30
                               ,sectorFloor = (-10)
                               ,sectorWalls = [(0,1),(2,3),(3,4),(4,5),(5,0)]
-                              ,sectorFloorTexture = floor
-                              ,sectorCeilingTexture = ceiling
-                              ,sectorWallTexture = wall2}
+                              ,sectorFloorMaterial = floor
+                              ,sectorCeilingMaterial = ceiling
+                              ,sectorWallMaterial = wall2}
 
     shaderProg <- createShaderProgram "shaders/vertex/projection-model.glsl"
                                       "shaders/fragment/solid-white.glsl"
@@ -412,10 +472,25 @@ main =
              ,0 ,0 ,-(far / (far - near)) ,-1
              ,0 ,0 ,-((far * near) / (far - near)) ,1]
 
+    let lPerspective =
+          let fov = 130
+              s = recip (tan $ fov * 0.5 * pi / 180)
+              far = 100
+              near = 1
+          in [s ,0 ,0 ,0
+             ,0 ,s ,0 ,0
+             ,0 ,0 ,-(far / (far - near)) ,-1
+             ,0 ,0 ,-((far * near) / (far - near)) ,1]
+
     SV.unsafeWith perspective $ \ptr -> do
       GL.UniformLocation loc1 <- GL.get (GL.uniformLocation shaderProg "projection")
       GL.currentProgram $= Just shaderProg
       GL.glUniformMatrix4fv loc1 1 0 ptr
+
+    SV.unsafeWith lPerspective $ \ptr -> do
+      GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "lightProjection")
+      GL.currentProgram $= Just shaderProg
+      GL.glUniformMatrix4fv loc 1 0 ptr
 
       GL.UniformLocation loc1 <- GL.get (GL.uniformLocation shadowShader "depthP")
       GL.currentProgram $= Just shadowShader
@@ -436,6 +511,9 @@ main =
 
     do GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "depthMap")
        GL.glUniform1i loc 1
+
+    do GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "nmap")
+       GL.glUniform1i loc 2
 
     GL.depthFunc $= Just GL.Lequal
 
@@ -470,7 +548,7 @@ main =
 
       GL.currentProgram $= Just shadowShader
       GL.bindFramebuffer GL.Framebuffer $= lightFBO
-      GL.viewport $= (GL.Position 0 0, GL.Size 512 512)
+      GL.viewport $= (GL.Position 0 0, GL.Size shadowMapResolution shadowMapResolution)
       GL.cullFace $= Just GL.Front
       lights' <- flip V.mapM (V.zip lights lightTextures) $ \(l, t) -> do
         GL.framebufferTexture2D GL.Framebuffer GL.DepthAttachment GL.Texture2D t 0
@@ -509,6 +587,7 @@ main =
 
         GL.activeTexture $= GL.TextureUnit 1
         GL.textureBinding GL.Texture2D $= Just t
+
         with l $ \ptr ->
           GL.bufferData GL.UniformBuffer $= (fromIntegral (sizeOf (undefined :: Light)), ptr, GL.StreamDraw)
 
@@ -520,25 +599,30 @@ main =
 
 drawSectorTextured :: SectorRenderer -> IO ()
 drawSectorTextured SectorRenderer{..} =
-  do GL.activeTexture $= GL.TextureUnit 0
-     GL.textureBinding GL.Texture2D $=
-       Just srWallTexture
+  do activateMaterial srWallMaterial
      srDrawWalls
-     GL.textureBinding GL.Texture2D $=
-       Just srFloorTexture
+     activateMaterial srFloorMaterial
      srDrawFloor
-     GL.textureBinding GL.Texture2D $=
-       Just srCeilingTexture
+     activateMaterial srCeilingMaterial
      srDrawCeiling
+
+activateMaterial :: Material -> IO ()
+activateMaterial Material{..} =
+  do GL.activeTexture $=
+       GL.TextureUnit 0
+     GL.textureBinding GL.Texture2D $=
+       Just matDiffuse
+     GL.activeTexture $=
+       GL.TextureUnit 2
+     GL.textureBinding GL.Texture2D $=
+       Just matNormalMap
 
 loadTexture :: FilePath -> IO GL.TextureObject
 loadTexture path =
   do x <- JP.readImage path
      case x of
        Right (JP.ImageYCbCr8 img) ->
-         do GL.activeTexture $=
-              GL.TextureUnit 0
-            t <- GL.genObjectName
+         do t <- GL.genObjectName
             GL.textureBinding GL.Texture2D $=
               Just t
             GL.textureFilter GL.Texture2D $=
@@ -577,14 +661,12 @@ unfoldEvents =
          0 -> return []
          _ -> (:) <$> peek evtPtr <*> unfoldEvents
 
-positionAttribute :: GL.AttribLocation
+positionAttribute, uvAttribute, normalAttribute, tangentAttribute, bitangentAttribute :: GL.AttribLocation
 positionAttribute = GL.AttribLocation 0
-
-normalAttribute :: GL.AttribLocation
 normalAttribute = GL.AttribLocation 1
-
-uvAttribute :: GL.AttribLocation
-uvAttribute = GL.AttribLocation 2
+tangentAttribute = GL.AttribLocation 2
+bitangentAttribute = GL.AttribLocation 3
+uvAttribute = GL.AttribLocation 4
 
 createShaderProgram :: FilePath -> FilePath -> IO GL.Program
 createShaderProgram vertexShaderPath fragmentShaderPath =
@@ -599,6 +681,10 @@ createShaderProgram vertexShaderPath fragmentShaderPath =
        positionAttribute
      GL.attribLocation shaderProg "in_Normal" $=
        normalAttribute
+     GL.attribLocation shaderProg "in_Tangent" $=
+       tangentAttribute
+     GL.attribLocation shaderProg "in_Bitangent" $=
+       bitangentAttribute
      GL.attribLocation shaderProg "in_UV" $=
        uvAttribute
      GL.linkProgram shaderProg
@@ -620,16 +706,13 @@ scene =
   (FRP.time <&>
    \t ->
      [Light (V3 0 0 0)
-            (V3 1 0.5 0.5)
-            (axisAngle (V3 0 1 0) $ pi + (pi / 4) * sin (realToFrac t))
+            1
+            (axisAngle (V3 0 1 0) $ pi + (pi / 8) * sin (realToFrac t))
             1000
-     ,Light (V3 0 15 97)
-            (V3 0.5 1 0)
+     ,Light (V3 0 15 ((sin (realToFrac t) * 50 * 0.5 + 0.5) + 20))
+            1
             (axisAngle (V3 0 1 0) 0)
-            (if sin (t * 10) >
-                0
-                then 900
-                else 500)])
+            1000])
 
 camera :: FRP.Wire Identity [SDL.Event] (M44 CFloat)
 camera = proc events -> do
