@@ -1,4 +1,4 @@
-#version 130
+#version 330
 
 uniform mat4 projection;
 uniform mat4 view;
@@ -15,6 +15,18 @@ out vec3 norm;
 out vec3 worldPos;
 out vec2 texCoord;
 out vec4 shadowCoords;
+out vec3 lightDirEyeSpace;
+out vec3 lightPosEye;
+
+struct LightInfo {
+  vec3 pos;
+  vec3 color;
+  vec3 direction;
+  float radius;
+};
+layout(std140) uniform Light {
+  LightInfo light;
+};
 
 void main(void) {
   vec4 wp = view * vec4(in_Position, 1);
@@ -22,5 +34,7 @@ void main(void) {
   worldPos = wp.xyz;
   texCoord = in_UV;
   shadowCoords = bias * projection * camV * vec4(in_Position, 1);
+  lightDirEyeSpace = (view * vec4(light.direction, 0)).xyz;
+  lightPosEye = (view * vec4(light.pos, 1)).xyz;
   gl_Position = projection * view * vec4(in_Position, 1);
 }

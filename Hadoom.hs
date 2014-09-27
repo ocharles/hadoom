@@ -12,7 +12,7 @@ import Control.Category
 import Control.Lens hiding (indices)
 import Control.Monad.Fix (MonadFix)
 import Data.Distributive (distribute)
-import Data.Foldable (any)
+import Data.Foldable (any, for_)
 import Data.Function (fix)
 import Data.Int (Int32)
 import Data.Monoid ((<>))
@@ -255,17 +255,15 @@ realiseSector Sector{..} =
           in fmap (fromIntegral . (+ n)) $
              triangulate (V.fromList $ IM.elems sectorVertices)
         ceilingIndices =
-          V.map (+ (fromIntegral $ V.length floorVertices)) $
-          V.concatMap id $
-          V.zipWith3
-            (\a b c -> [a,c,b])
-            floorIndices
-            (V.drop 1 $
-             floorIndices <>
-             floorIndices)
-            (V.drop 2 $
-             floorIndices <>
-             floorIndices)
+          let rotate v =
+                case V.splitAt 3 v of
+                  (h,t)
+                    | V.length h == 3 ->
+                      [h V.! 0,h V.! 2,h V.! 1] V.++
+                      rotate t
+                  _ -> []
+          in V.map (+ (fromIntegral $ V.length floorVertices))
+                   (rotate floorIndices)
         initializeIBO =
           do let indices :: V.Vector Int32
                  indices = wallIndices <> floorIndices <> ceilingIndices
@@ -284,32 +282,60 @@ realiseSector Sector{..} =
 data Light =
   Light {lightPos :: V3 CFloat
         ,lightColor :: V3 CFloat
+        ,lightDirection :: Quaternion CFloat
         ,lightRadius :: CFloat}
   deriving (Show)
 
+genLightDepthMap :: IO GL.TextureObject
+genLightDepthMap =
+  do lightDepthMap <- GL.genObjectName
+     GL.textureBinding GL.Texture2D $=
+       Just lightDepthMap
+     GL.textureCompareMode GL.Texture2D $=
+       Just GL.Lequal
+     GL.textureFilter GL.Texture2D $=
+       ((GL.Nearest,Nothing),GL.Nearest)
+     GL.textureWrapMode GL.Texture2D GL.S $= (GL.Repeated, GL.Clamp)
+     GL.texImage2D GL.Texture2D
+                   GL.NoProxy
+                   0
+                   GL.DepthComponent16
+                   (GL.TextureSize2D 512 512)
+                   0
+                   (GL.PixelData GL.DepthComponent GL.Float nullPtr)
+     return lightDepthMap
+
+genLightFramebufferObject :: IO GL.FramebufferObject
+genLightFramebufferObject =
+  do lightFBO <- GL.genObjectName
+     GL.bindFramebuffer GL.Framebuffer $=
+       lightFBO
+     GL.drawBuffer $= GL.NoBuffers
+     return lightFBO
 
 instance Storable Light where
   sizeOf _ =
     sizeOf (undefined :: V4 CFloat) *
-    2
+    3
   alignment _ = sizeOf (undefined :: V4 CFloat)
-  peek ptr =
-    Light <$>
-    peek (castPtr ptr) <*>
-    peek (castPtr ptr `plusPtr`
-          fromIntegral (sizeOf (undefined :: V4 CFloat))) <*>
-    peek (castPtr ptr `plusPtr`
-          fromIntegral
-            (sizeOf (undefined :: V4 CFloat) +
-             sizeOf (undefined :: V3 CFloat)))
-  poke ptr (Light pos col r) =
+  peek ptr = error "peek Light"
+  poke ptr (Light pos col dir r) =
     do poke (castPtr ptr) pos
        poke (castPtr $ ptr `plusPtr`
              fromIntegral (sizeOf (undefined :: V4 CFloat)))
             col
        poke (castPtr $ ptr `plusPtr`
              fromIntegral
-               (sizeOf (undefined :: V4 CFloat) +
+               (sizeOf (undefined :: V4 CFloat) *
+                2))
+            (case (inv33 (fromQuaternion dir)) of
+               Just m ->
+                 m !*
+                 V3 0 0 (-1) :: V3 CFloat)
+       poke (castPtr $ ptr `plusPtr`
+             fromIntegral
+               (sizeOf (undefined :: V4 CFloat) *
+                2 +
                 sizeOf (undefined :: V3 CFloat)))
             r
 
@@ -321,23 +347,12 @@ main =
     _ <- SDL.createWindowAndRenderer 800 600 0 winPtr rendererPtr
     win <- peek winPtr
     withCString "Hadoom" $ SDL.setWindowTitle win
-    GL.clearColor $= GL.Color4 0.5 0.5 0.5 1
+    GL.clearColor $= GL.Color4 0 0 0 1
 
     wall1 <- loadTexture "wall.jpg"
     wall2 <- loadTexture "wall-2.jpg"
     ceiling <- loadTexture "ceiling.jpg"
     floor <- loadTexture "floor.jpg"
-
-    lightFBO <- GL.genObjectName
-    lightDepthMap <- GL.genObjectName
-    GL.bindFramebuffer GL.Framebuffer $= lightFBO
-    GL.textureBinding GL.Texture2D $= Just lightDepthMap
-    GL.textureCompareMode GL.Texture2D $= Just GL.Lequal
-    GL.textureFilter GL.Texture2D $= ((GL.Nearest,Nothing),GL.Nearest)
-    GL.texImage2D GL.Texture2D GL.NoProxy 0 GL.DepthComponent16 (GL.TextureSize2D 512 512) 0 (GL.PixelData GL.DepthComponent GL.Float nullPtr)
-    GL.framebufferTexture2D GL.Framebuffer GL.DepthAttachment GL.Texture2D lightDepthMap 0
-    GL.drawBuffer $= GL.NoBuffers
-    GL.get (GL.framebufferStatus GL.Framebuffer) >>= print
 
     sector1 <-
       let vertices = IM.fromList $ zip [0 ..] [V2 (-50) (-50)
@@ -406,15 +421,6 @@ main =
       GL.currentProgram $= Just shadowShader
       GL.glUniformMatrix4fv loc1 1 0 ptr
 
-    with (distribute $ m33_to_m44 (fromQuaternion (axisAngle (V3 0 1 0) pi)) !*! mkTransformation 0 (V3 0 10 0)) $ \ptr -> do
-      GL.UniformLocation loc1 <- GL.get (GL.uniformLocation shadowShader "depthV")
-      GL.currentProgram $= Just shadowShader
-      GL.glUniformMatrix4fv loc1 1 0 (castPtr (ptr :: Ptr (M44 CFloat)))
-
-      GL.UniformLocation loc1 <- GL.get (GL.uniformLocation shaderProg "camV")
-      GL.currentProgram $= Just shaderProg
-      GL.glUniformMatrix4fv loc1 1 0 (castPtr (ptr :: Ptr (M44 CFloat)))
-
     let bias = [ 0.5, 0, 0, 0
                , 0, 0.5, 0, 0
                , 0, 0, 0.5, 0
@@ -425,14 +431,13 @@ main =
       GL.currentProgram $= Just shaderProg
       GL.glUniformMatrix4fv loc1 1 0 ptr
 
-
     do GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "tex")
        GL.glUniform1i loc 0
 
-    do GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "shadowTex")
+    do GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "depthMap")
        GL.glUniform1i loc 1
 
-    GL.depthFunc $= Just GL.Less
+    GL.depthFunc $= Just GL.Lequal
 
     lightsUBO <- GL.genObjectName
     shaderId <- unsafeCoerce shaderProg
@@ -441,11 +446,9 @@ main =
     GL.bindBufferRange GL.IndexedUniformBuffer 0 $= Just (lightsUBO, 0, fromIntegral (sizeOf (undefined :: Light) * 1))
     GL.bindBuffer GL.UniformBuffer $= Just lightsUBO
 
-    GL.activeTexture $= GL.TextureUnit 1
-    GL.textureBinding GL.Texture2D $= Just lightDepthMap
-    GL.activeTexture $= GL.TextureUnit 0
-
     tstart <- getCurrentTime
+    lightFBO <- genLightFramebufferObject
+    lightTextures <- V.replicateM 2 genLightDepthMap
 
     fix (\again (w, currentTime) -> do
       newTime <- getCurrentTime
@@ -460,39 +463,65 @@ main =
         GL.currentProgram $= Just shaderProg
         GL.glUniformMatrix4fv loc1 1 0 (castPtr (ptr :: Ptr (M44 CFloat)))
 
-      let lights' = flip SV.map lights $ \(Light (V3 x y z) col r) ->
-           Light ((viewMat !* V4 x y z 1) ^. _xyz) col r
-      SV.unsafeWith lights' $ \ptr -> do
-        GL.currentProgram $= Just shaderProg
-        GL.bufferData GL.UniformBuffer $= (fromIntegral (sizeOf (undefined :: Light) * SV.length lights'), ptr, GL.StreamDraw)
+      GL.blend $= GL.Disabled
+      GL.depthMask $= GL.Enabled
+      GL.depthFunc $= Just GL.Lequal
+      GL.colorMask $= GL.Color4 GL.Disabled GL.Disabled GL.Disabled GL.Disabled
 
-      with (distribute $ m33_to_m44 (fromQuaternion (axisAngle (V3 0 1 0) pi))) $ \ptr -> do
-        GL.UniformLocation loc1 <- GL.get (GL.uniformLocation shaderProg "camView")
-        GL.currentProgram $= Just shaderProg
-        GL.glUniformMatrix4fv loc1 1 0 (castPtr (ptr :: Ptr (M44 CFloat)))
-
+      GL.currentProgram $= Just shadowShader
       GL.bindFramebuffer GL.Framebuffer $= lightFBO
       GL.viewport $= (GL.Position 0 0, GL.Size 512 512)
       GL.cullFace $= Just GL.Front
-      GL.clear [GL.DepthBuffer]
-      GL.currentProgram $= Just shadowShader
-      case sector1 of SectorRenderer{..} -> srDrawWalls >> srDrawFloor
-      case sector2 of SectorRenderer{..} -> srDrawWalls >> srDrawFloor
+      lights' <- flip V.mapM (V.zip lights lightTextures) $ \(l, t) -> do
+        GL.framebufferTexture2D GL.Framebuffer GL.DepthAttachment GL.Texture2D t 0
+        GL.clear [GL.DepthBuffer]
+
+        let v = m33_to_m44 (fromQuaternion (lightDirection l)) !*! mkTransformation 0 (negate (lightPos l))
+        with (distribute v) $ \ptr -> do
+          GL.UniformLocation loc <- GL.get (GL.uniformLocation shadowShader "depthV")
+          GL.glUniformMatrix4fv loc 1 0 (castPtr (ptr :: Ptr (M44 CFloat)))
+
+        case sector1 of SectorRenderer{..} -> srDrawWalls >> srDrawFloor
+        case sector2 of SectorRenderer{..} -> srDrawWalls >> srDrawFloor
+        return (l, t, distribute v)
 
       GL.bindFramebuffer GL.Framebuffer $= GL.defaultFramebufferObject
       GL.cullFace $= Just GL.Back
       GL.viewport $= (GL.Position 0 0, GL.Size 800 600)
-      GL.clear [GL.ColorBuffer, GL.DepthBuffer]
+      GL.clear [GL.DepthBuffer]
+
       GL.currentProgram $= Just shaderProg
       drawSectorTextured sector1
       drawSectorTextured sector2
+
+      GL.blend $= GL.Enabled
+      GL.blendFunc $= (GL.One, GL.One)
+      GL.colorMask $= GL.Color4 GL.Enabled GL.Enabled GL.Enabled GL.Enabled
+      GL.clear [GL.ColorBuffer]
+      GL.depthFunc $= Just GL.Equal
+      GL.depthMask $= GL.Disabled
+      GL.currentProgram $= Just shaderProg
+      flip V.mapM_ lights' $ \(l, t, v) -> do
+        with v $ \ptr -> do
+          GL.currentProgram $= Just shaderProg
+          GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "camV")
+          GL.glUniformMatrix4fv loc 1 0 (castPtr (ptr :: Ptr (M44 CFloat)))
+
+        GL.activeTexture $= GL.TextureUnit 1
+        GL.textureBinding GL.Texture2D $= Just t
+        with l $ \ptr ->
+          GL.bufferData GL.UniformBuffer $= (fromIntegral (sizeOf (undefined :: Light)), ptr, GL.StreamDraw)
+
+        drawSectorTextured sector1
+        drawSectorTextured sector2
 
       SDL.glSwapWindow win
       again (w', newTime)) (scene, tstart)
 
 drawSectorTextured :: SectorRenderer -> IO ()
 drawSectorTextured SectorRenderer{..} =
-  do GL.textureBinding GL.Texture2D $=
+  do GL.activeTexture $= GL.TextureUnit 0
+     GL.textureBinding GL.Texture2D $=
        Just srWallTexture
      srDrawWalls
      GL.textureBinding GL.Texture2D $=
@@ -533,7 +562,6 @@ loadTexture path =
                          0
                          (GL.PixelData GL.RGB GL.Float ptr)
                    GL.generateMipmap' GL.Texture2D
-                   GL.get GL.maxTextureMaxAnisotropy >>= print
                    GL.textureMaxAnisotropy GL.Texture2D $=
                      16
                    return t
@@ -584,22 +612,24 @@ createShaderProgram vertexShaderPath fragmentShaderPath =
 
 data Scene =
   Scene {sceneCamera :: M44 CFloat
-        ,sceneLights :: SV.Vector Light}
+        ,sceneLights :: V.Vector Light}
 
 scene :: FRP.Wire Identity [SDL.Event] Scene
 scene =
   Scene <$> camera <*>
   (FRP.time <&>
    \t ->
-     [Light (V3 0 15 0)
-            (V3 1 1 1)
+     [Light (V3 0 0 0)
+            (V3 1 0.5 0.5)
+            (axisAngle (V3 0 1 0) $ pi + (pi / 4) * sin (realToFrac t))
             1000
-     ,Light (V3 0 15 70)
-            1
+     ,Light (V3 0 15 97)
+            (V3 0.5 1 0)
+            (axisAngle (V3 0 1 0) 0)
             (if sin (t * 10) >
                 0
-                then 1000
-                else 0)])
+                then 900
+                else 500)])
 
 camera :: FRP.Wire Identity [SDL.Event] (M44 CFloat)
 camera = proc events -> do
