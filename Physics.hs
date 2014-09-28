@@ -30,11 +30,11 @@ scene =
   (FRP.time <&>
    \t ->
      [Light (V3 0 0 0)
-            (V3 1 0 0)
+            (V3 1 0.5 0.5)
             (axisAngle (V3 0 1 0) $ pi + (pi / 8) * sin (realToFrac t))
             200
      ,Light (V3 0 15 ((sin (realToFrac t) * 50 * 0.5 + 0.5) + 20))
-            (V3 0 1 0)
+            (V3 0.5 1 0.5)
             (axisAngle (V3 0 1 0) 0)
             200])
 

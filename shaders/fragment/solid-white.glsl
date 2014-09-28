@@ -34,6 +34,6 @@ void main(void) {
     float b = 1.0 / (light.radius * light.radius * minLight);
     float att = 1 + b * d * d;
     float visibility = texture(depthMap, shadowCoords.xyz / shadowCoords.w);
-    fragColor += vec4(visibility * diffuse * light.color * clamp(dot(textureNormal, l), 0, 1) / att, 1);
+    fragColor = vec4(visibility * diffuse * light.color * clamp(dot(textureNormal, l), 0, 1) / att, 1);
   }
 }

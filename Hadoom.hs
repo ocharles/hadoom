@@ -36,12 +36,14 @@ import Physics
 import Sector
 import Shader
 
+(screenWidth, screenHeight) = (1400, 1050)
+
 main :: IO ()
 main =
   alloca $ \winPtr ->
   alloca $ \rendererPtr -> do
     _ <- SDL.init SDL.initFlagEverything
-    _ <- SDL.createWindowAndRenderer 800 600 0 winPtr rendererPtr
+    _ <- SDL.createWindowAndRenderer screenWidth screenHeight 0 winPtr rendererPtr
     win <- peek winPtr
     withCString "Hadoom" $ SDL.setWindowTitle win
     GL.clearColor $= GL.Color4 0 0 0 1
@@ -204,7 +206,7 @@ main =
 
       GL.bindFramebuffer GL.Framebuffer $= GL.defaultFramebufferObject
       GL.cullFace $= Just GL.Back
-      GL.viewport $= (GL.Position 0 0, GL.Size 800 600)
+      GL.viewport $= (GL.Position 0 0, GL.Size screenWidth screenHeight)
       GL.clear [GL.DepthBuffer]
 
       GL.currentProgram $= Just shaderProg
