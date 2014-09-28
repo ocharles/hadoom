@@ -103,6 +103,12 @@ main =
 
     GL.currentProgram $= Just shaderProg
 
+    spotlightIndex <- withCString "spotlight" $
+      GL.glGetSubroutineIndex (unsafeCoerce shaderProg) GL.gl_FRAGMENT_SHADER
+
+    pointIndex <- withCString "omni" $
+      GL.glGetSubroutineIndex (unsafeCoerce shaderProg) GL.gl_FRAGMENT_SHADER
+
     let perspective =
           let fov = 75
               s = recip (tan $ fov * 0.5 * pi / 180)
@@ -225,6 +231,12 @@ main =
           GL.currentProgram $= Just shaderProg
           GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "camV")
           GL.glUniformMatrix4fv loc 1 0 (castPtr (ptr :: Ptr (M44 CFloat)))
+
+        let i = case lightShape l of
+                  Omni -> pointIndex
+                  Spotlight -> spotlightIndex
+
+        with i $ GL.glUniformSubroutinesuiv GL.gl_FRAGMENT_SHADER 1
 
         GL.activeTexture $= GL.TextureUnit 1
         GL.textureBinding GL.Texture2D $= Just t

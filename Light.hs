@@ -7,11 +7,14 @@ import Linear as L
 
 import qualified Graphics.Rendering.OpenGL as GL
 
+data LightShape = Omni | Spotlight deriving (Show)
+
 data Light =
   Light {lightPos :: V3 CFloat
         ,lightColor :: V3 CFloat
         ,lightDirection :: Quaternion CFloat
-        ,lightRadius :: CFloat}
+        ,lightRadius :: CFloat
+        ,lightShape :: LightShape}
   deriving (Show)
 
 instance Storable Light where
@@ -20,7 +23,7 @@ instance Storable Light where
     3
   alignment _ = sizeOf (undefined :: V4 CFloat)
   peek ptr = error "peek Light"
-  poke ptr (Light pos col dir r) =
+  poke ptr (Light pos col dir r _) =
     do poke (castPtr ptr) pos
        poke (castPtr $ ptr `plusPtr`
              fromIntegral (sizeOf (undefined :: V4 CFloat)))
