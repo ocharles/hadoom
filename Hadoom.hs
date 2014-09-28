@@ -46,10 +46,12 @@ main =
     withCString "Hadoom" $ SDL.setWindowTitle win
     GL.clearColor $= GL.Color4 0 0 0 1
 
-    wall1 <- Material <$> loadTexture "RoughBlockWall-ColorMap.jpg" <*> loadTexture "RoughBlockWall-NormalMap.jpg"
-    wall2 <- return wall1 -- Material <$> loadTexture "wall-2.jpg" <*> loadTexture "flat.jpg"
-    ceiling <- Material <$> loadTexture "CrustyConcrete-ColorMap.jpg" <*> loadTexture "CrustyConcrete-NormalMap.jpg"
-    floor <- Material <$> loadTexture "AfricanEbonyBoards-ColorMap.jpg" <*> loadTexture "AfricanEbonyBoards-NormalMap.jpg"
+    GL.glEnable GL.gl_FRAMEBUFFER_SRGB
+
+    wall1 <- Material <$> loadTexture "RoughBlockWall-ColorMap.jpg" SRGB <*> loadTexture "RoughBlockWall-NormalMap.jpg" Linear
+    wall2 <- return wall1 -- Material <$> loadTexture "wall-2.jpg" <*> loadTexture "flat.jpg" Linear
+    ceiling <- Material <$> loadTexture "CrustyConcrete-ColorMap.jpg" SRGB <*> loadTexture "CrustyConcrete-NormalMap.jpg" Linear
+    floor <- Material <$> loadTexture "AfricanEbonyBoards-ColorMap.jpg" SRGB <*> loadTexture "AfricanEbonyBoards-NormalMap.jpg" Linear
 
     sector1 <-
       let vertices = IM.fromList $ zip [0 ..] [V2 (-50) (-50)

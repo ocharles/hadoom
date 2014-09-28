@@ -15,8 +15,10 @@ data Material =
   Material {matDiffuse :: GL.TextureObject
            ,matNormalMap :: GL.TextureObject}
 
-loadTexture :: FilePath -> IO GL.TextureObject
-loadTexture path =
+data ColorSpace = SRGB | Linear
+
+loadTexture :: FilePath -> ColorSpace -> IO GL.TextureObject
+loadTexture path colorSpace =
   do x <- JP.readImage path
      case x of
        Right (JP.ImageYCbCr8 img) ->
@@ -27,9 +29,7 @@ loadTexture path =
               ((GL.Linear',Just GL.Linear'),GL.Linear')
             let toRgb8 =
                   JP.convertPixel :: JP.PixelYCbCr8 -> JP.PixelRGB8
-                toRgbF =
-                  JP.promotePixel :: JP.PixelRGB8 -> JP.PixelRGBF
-            case JP.pixelMap (toRgbF . toRgb8)
+            case JP.pixelMap toRgb8
                              img of
               JP.Image w h d ->
                 do SV.unsafeWith d $
@@ -38,11 +38,11 @@ loadTexture path =
                          GL.Texture2D
                          GL.NoProxy
                          0
-                         GL.RGB32F
+                         (case colorSpace of SRGB -> GL.SRGB ; Linear -> GL.RGB32F)
                          (GL.TextureSize2D (fromIntegral w)
                                            (fromIntegral h))
                          0
-                         (GL.PixelData GL.RGB GL.Float ptr)
+                         (GL.PixelData GL.RGB GL.UnsignedByte ptr)
                    GL.generateMipmap' GL.Texture2D
                    GL.textureMaxAnisotropy GL.Texture2D $=
                      16
