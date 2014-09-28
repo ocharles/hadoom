@@ -49,8 +49,9 @@ subroutine (lightRoutine)
 
 float spotlight() {
   float visibility = texture(depthMap, shadowCoords.xyz / shadowCoords.w);
-  float spot = (dot(lightDirEyeSpace, -normalize(lightEyeDirEyeSpace)) > 0.5) ? 1 : 0;
-  return spot * visibility;
+  float theta = dot(lightDirEyeSpace, -normalize(lightEyeDirEyeSpace));
+
+  return visibility * smoothstep(0, 1, (theta - 0.5) / 0.4);
 }
 
 
