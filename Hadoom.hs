@@ -8,6 +8,7 @@ import Prelude hiding (any, floor, ceiling)
 
 import Control.Applicative
 import Control.Lens hiding (indices)
+import Control.Monad (forM_)
 import Data.Distributive (distribute)
 import Data.Function (fix)
 import Data.Time (getCurrentTime, diffUTCTime)
@@ -63,6 +64,19 @@ main =
     floor <- Material <$> loadTexture "AfricanEbonyBoards-ColorMap.jpg" SRGB <*> loadTexture "AfricanEbonyBoards-NormalMap.jpg" Linear
     GL.get GL.errors >>= mapM_ print
 
+
+    sector3 <-
+      let vertices = IM.fromList $ zip [0.. ] $ V.toList . V.map ((* 20) . (subtract (V2 3 2))) $
+                       makeSimple ([V2 2 1, V2 1 2, V2 3 2]) [V2 0 0, V2 4 0, V2 8 5, V2 5 3, V2 3 4, V2 0 4 ]
+      in buildSector Blueprint { blueprintVertices = vertices
+                               , blueprintCeiling = 30
+                               , blueprintFloor = -10
+                               , blueprintWalls = [(0, 1), (1, 2), (2, 3), (4, 5), (5, 6), (6, 7), (8, 9), (9, 10), (10, 0)]
+                               , blueprintFloorMaterial = floor
+                               , blueprintCeilingMaterial = ceiling
+                               , blueprintWallMaterial = wall1
+                               }
+
     sector1 <-
       let vertices = IM.fromList $ zip [0 ..] [V2 (-50) (-50)
                                               ,V2 (-30) (-50)
@@ -103,6 +117,8 @@ main =
                               ,blueprintFloorMaterial = floor
                               ,blueprintCeilingMaterial = ceiling
                               ,blueprintWallMaterial = wall2}
+
+    let sectors = [sector3]
 
     putStrLn "Loading main shader"
     shaderProg <- createShaderProgram "shaders/vertex/projection-model.glsl"
@@ -193,7 +209,7 @@ main =
 
     tstart <- getCurrentTime
     lightFBO <- genLightFramebufferObject
-    lightTextures <- V.replicateM 2 genLightDepthMap
+    lightTextures <- V.replicateM 4 genLightDepthMap
 
     fix (\again (w, currentTime) -> do
       newTime <- getCurrentTime
@@ -229,8 +245,8 @@ main =
               GL.UniformLocation loc <- GL.get (GL.uniformLocation shadowShader "depthV")
               GL.glUniformMatrix4fv loc 1 0 (castPtr (ptr :: Ptr (M44 CFloat)))
 
-            case sector1 of Sector{..} -> sectorDrawWalls >> sectorDrawFloor
-            case sector2 of Sector{..} -> sectorDrawWalls >> sectorDrawFloor
+            forM_ sectors $ \s ->
+              case s of Sector{..} -> sectorDrawWalls >> sectorDrawFloor
           Omni -> return ()
 
         return (l, t, distribute v)
@@ -241,8 +257,7 @@ main =
       GL.clear [GL.DepthBuffer]
 
       GL.currentProgram $= Just shaderProg
-      drawSectorTextured sector1
-      drawSectorTextured sector2
+      mapM_ drawSectorTextured sectors
 
       GL.blend $= GL.Enabled
       GL.blendFunc $= (GL.One, GL.One)
@@ -273,8 +288,10 @@ main =
 
         GL.get GL.errors >>= mapM_ print
 
-        drawSectorTextured sector1
-        drawSectorTextured sector2
+        -- GL.polygonMode $= (GL.Line, GL.Line)
+        mapM_ drawSectorTextured sectors
+        -- drawSectorTextured sector1
+        -- drawSectorTextured sector2
         GL.get GL.errors >>= mapM_ print
 
       SDL.glSwapWindow win

@@ -29,16 +29,21 @@ scene =
   Scene <$> camera <*>
   (FRP.time <&>
    \t ->
-     [Light (V3 0 0 0)
+     [Light (V3 (-3) 0 40)
             (V3 1 0.5 0.5)
             150
             Omni
-     ,Light (V3 0 15 ((sin (realToFrac t * 2) * 50 * 0.5 + 0.5) + 20))
+     ,Light (V3 (10) 15 26)
             (V3 0.5 1 0.5)
             350
             (Spotlight (V3 0 0 (-1))
                        (realToFrac $ cos t * 0.5 + 0.5)
-                       0.3)])
+                       0.3)
+     ,Light (V3 0 15 90)
+            1
+            500
+            (Spotlight (V3 0 0 (-1)) 0.5 0.3)
+     ])
 
 camera :: FRP.Wire Identity [SDL.Event] (M44 CFloat)
 camera = proc events -> do

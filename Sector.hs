@@ -5,6 +5,7 @@ module Sector where
 import Prelude hiding (any, floor, ceiling, (.), id)
 
 import Control.Applicative
+import Data.Ord (comparing)
 import Control.Category
 import Control.Lens hiding (indices)
 import Data.Foldable (any)
@@ -82,9 +83,82 @@ data Sector =
                  ,sectorCeilingMaterial :: Material
                  ,sectorWallMaterial :: Material}
 
-triangulate :: (Fractional a, Ord a) => V.Vector (V2 a) -> V.Vector Int
-triangulate = go . addIndices
-  where takeFirst f =
+rayLineIntersection :: (Epsilon a,Fractional a,Ord a)
+                    => V2 a -> V2 a -> V2 a -> V2 a -> Maybe (V2 a)
+rayLineIntersection p r q q' =
+  let s = q' - q
+      cross (V2 a b) (V2 x y) = a * y - b * x
+      pToQ = q - p
+      tNum = pToQ `cross` s
+      uNum = pToQ `cross` r
+  in case r `cross` s of
+       denom
+         | nearZero denom -> Nothing
+         | otherwise ->
+           let u = uNum / denom
+               t = tNum / denom
+           in if 0 <= u && u <= 1
+                 then Just (p + r ^* t)
+                 else Nothing
+
+makeSimple :: (Epsilon a,Fractional a,Ord a)
+           => V.Vector (V2 a) -> V.Vector (V2 a) -> V.Vector (V2 a)
+makeSimple inner outer =
+  let xMost = comparing (view _x)
+      m = V.maximumBy xMost inner
+      mIndex = V.maxIndexBy xMost inner
+      edges = V.zip outer (V.tail outer <> outer)
+      intersections =
+        V.map (\(start,end) ->
+                 ((rayLineIntersection m
+                                       (V2 1 0)
+                                       start
+                                       end)
+                 ,start
+                 ,end))
+              edges
+      (Just i,start,end) =
+        V.minimumBy
+          (\(x,_,_) (y,_,_) ->
+             case (x,y) of
+               (Nothing,Nothing) -> EQ
+               (Just _,Nothing) -> LT
+               (Nothing,Just _) -> GT
+               (Just a,Just b) ->
+                 comparing (qd m) a b)
+          intersections
+      p =
+        V.maximumBy xMost
+                    [start,end]
+      containing =
+        V.filter (pointInTriangle m i p .
+                  snd) $
+        V.filter (not . nearZero .
+                  (subtract p) .
+                  snd) $
+        V.imap (,) outer
+      isReflex _ = True
+      angleAgainstM =
+        dot (V2 1 0) .
+        subtract m
+      (minimalReflex,_) =
+        V.minimumBy (comparing (angleAgainstM . snd))
+                    (V.filter (isReflex . snd) containing)
+  in if V.null containing
+        then undefined
+        else case V.splitAt minimalReflex outer of
+               (before,after) ->
+                 before <>
+                 V.take 1 after <>
+                 V.take (succ (V.length inner))
+                        (V.drop mIndex inner <>
+                         inner) <>
+                 after
+
+triangulate :: (Epsilon a, Fractional a, Ord a) => V.Vector (V2 a) -> V.Vector Int
+triangulate = collapseAndTriangulate
+  where collapseAndTriangulate vs = go $ addIndices vs
+        takeFirst f =
           V.take 1 .
           V.filter f
         isEar ((_,a),(_,b),(_,c),otherVertices) =
@@ -114,6 +188,10 @@ triangulate = go . addIndices
                                V.drop (i + 3) $
                                doubleVerts)
                             vertices)
+        -- collapse vs =
+        --   V.map (\i ->
+        --            let v = vs V.! i
+        --            in fst $ V.head $ V.filter (nearZero . (v -) . snd) $ V.imap (,) vs)
 
 buildSector :: Blueprint -> IO Sector
 buildSector Blueprint{..} =
