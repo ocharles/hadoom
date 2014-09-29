@@ -1,42 +1,13 @@
 {-# LANGUAGE RecordWildCards #-}
 module Shader where
 
-import Prelude hiding (any, floor, ceiling, (.), id)
+import Prelude hiding (any, floor, ceiling)
 
-import Control.Applicative
-import Control.Arrow
-import Control.Category
-import Control.Lens hiding (indices)
-import Control.Monad.Fix (MonadFix)
-import Data.Distributive (distribute)
-import Data.Foldable (any, for_)
-import Data.Function (fix)
-import Data.Int (Int32)
-import Data.Monoid ((<>))
-import Data.Time (getCurrentTime, diffUTCTime)
-import Foreign (Ptr, Storable(..), alloca, castPtr, nullPtr, plusPtr, with)
-import Foreign.C (CFloat, withCString)
+import Control.Monad (unless)
 import Graphics.Rendering.OpenGL (($=))
-import Linear as L
-import Unsafe.Coerce (unsafeCoerce)
 
-import qualified Codec.Picture as JP
-import qualified Codec.Picture.Types as JP
-import qualified Data.IntMap.Strict as IM
 import qualified Data.Text.Encoding as Text
 import qualified Data.Text.IO as Text
-import qualified Data.Vector as V
-import qualified Data.Vector.Storable as SV
-import qualified Graphics.Rendering.OpenGL as GL
-import qualified Graphics.Rendering.OpenGL.Raw as GL
-import qualified Graphics.UI.SDL.Basic as SDL
-import qualified Graphics.UI.SDL.Enum as SDL
-import qualified Graphics.UI.SDL.Event as SDL
-import qualified Graphics.UI.SDL.Types as SDL
-import qualified Graphics.UI.SDL.Video as SDL
-
-import Graphics.Rendering.OpenGL (($=))
-
 import qualified Graphics.Rendering.OpenGL as GL
 
 import Paths_hadoom
@@ -61,6 +32,9 @@ createShaderProgram vertexShaderPath fragmentShaderPath =
      GL.attribLocation shaderProg "in_UV" $=
        uvAttribute
      GL.linkProgram shaderProg
+     linked <- GL.get (GL.linkStatus shaderProg)
+     unless linked $ do
+       GL.get (GL.programInfoLog shaderProg) >>= putStrLn
      return shaderProg
   where compileShader path shader =
           do src <- getDataFileName path >>= Text.readFile

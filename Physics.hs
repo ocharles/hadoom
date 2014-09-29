@@ -31,14 +31,14 @@ scene =
    \t ->
      [Light (V3 0 0 0)
             (V3 1 0.5 0.5)
-            (axisAngle (V3 0 1 0) $ pi + (pi / 8) * sin (realToFrac t))
             150
             Omni
-     ,Light (V3 0 15 ((sin (realToFrac t) * 50 * 0.5 + 0.5) + 20))
+     ,Light (V3 0 15 ((sin (realToFrac t * 2) * 50 * 0.5 + 0.5) + 20))
             (V3 0.5 1 0.5)
-            (axisAngle (V3 0 1 0) 0)
             350
-            Spotlight])
+            (Spotlight (V3 0 0 (-1))
+                       (realToFrac $ cos t * 0.5 + 0.5)
+                       0.3)])
 
 camera :: FRP.Wire Identity [SDL.Event] (M44 CFloat)
 camera = proc events -> do

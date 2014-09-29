@@ -23,11 +23,18 @@ out vec3 lightEyeDirEyeSpace;
 struct LightInfo {
   vec3 pos;
   vec3 color;
-  vec3 direction;
   float radius;
 };
+
+struct SpotlightInfo {
+  vec3 direction;
+  float cosConeRadius;
+  float cosPenumbraRadius;
+};
+
 layout(std140) uniform Light {
   LightInfo light;
+  SpotlightInfo spotlightParams;
 };
 
 void main(void) {
@@ -35,7 +42,7 @@ void main(void) {
   vec3 worldPos = wp.xyz;
   texCoord = in_UV;
   shadowCoords = bias * lightProjection * camV * vec4(in_Position, 1);
-  lightDirEyeSpace = (view * vec4(light.direction, 0)).xyz;
+  lightDirEyeSpace = (view * vec4(spotlightParams.direction, 0)).xyz;
   vec3 lightPosEye = (view * vec4(light.pos, 1)).xyz;
   gl_Position = projection * view * vec4(in_Position, 1);
 

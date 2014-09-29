@@ -18,11 +18,18 @@ subroutine uniform lightRoutine lightContribution;
 struct LightInfo {
   vec3 pos;
   vec3 color;
-  vec3 direction;
   float radius;
 };
+
+struct SpotlightInfo {
+  vec3 direction;
+  float cosConeRadius;
+  float cosPenumbraRadius;
+};
+
 layout(std140) uniform Light {
   LightInfo light;
+  SpotlightInfo spotlightParams;
 };
 
 const float minLight = 0.01;
@@ -44,14 +51,13 @@ void main(void) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-
 subroutine (lightRoutine)
 
 float spotlight() {
   float visibility = texture(depthMap, shadowCoords.xyz / shadowCoords.w);
   float theta = dot(lightDirEyeSpace, -normalize(lightEyeDirEyeSpace));
 
-  return visibility * smoothstep(0, 1, (theta - 0.5) / 0.4);
+  return visibility * smoothstep(0, 1, (theta - spotlightParams.cosConeRadius) / spotlightParams.cosPenumbraRadius);
 }
 
 

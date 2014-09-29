@@ -1,18 +1,22 @@
 module Light where
 
-import Foreign (Storable(..), castPtr, nullPtr, plusPtr)
+import Foreign (Storable(..), allocaBytes, castPtr, nullPtr, plusPtr)
 import Foreign.C (CFloat)
 import Graphics.Rendering.OpenGL (($=))
 import Linear as L
 
 import qualified Graphics.Rendering.OpenGL as GL
 
-data LightShape = Omni | Spotlight deriving (Show)
+data LightShape
+  = Omni
+  | Spotlight (V3 CFloat) -- direction
+              CFloat      -- full radius
+              CFloat      -- penumbra radius
+  deriving (Show)
 
 data Light =
   Light {lightPos :: V3 CFloat
         ,lightColor :: V3 CFloat
-        ,lightDirection :: Quaternion CFloat
         ,lightRadius :: CFloat
         ,lightShape :: LightShape}
   deriving (Show)
@@ -20,31 +24,28 @@ data Light =
 instance Storable Light where
   sizeOf _ =
     sizeOf (undefined :: V4 CFloat) *
-    3
+    4
   alignment _ = sizeOf (undefined :: V4 CFloat)
   peek ptr = error "peek Light"
-  poke ptr (Light pos col dir r _) =
+  poke ptr (Light pos col r shape) =
     do poke (castPtr ptr) pos
-       poke (castPtr $ ptr `plusPtr`
-             fromIntegral (sizeOf (undefined :: V4 CFloat)))
+       poke (castPtr $ ptr `plusPtr` fromIntegral (sizeOf (undefined :: V4 CFloat)))
             col
-       poke (castPtr $ ptr `plusPtr`
-             fromIntegral
-               (sizeOf (undefined :: V4 CFloat) *
-                2))
-            (case (inv33 (fromQuaternion dir)) of
-               Just m ->
-                 m !*
-                 V3 0 0 (-1) :: V3 CFloat)
-       poke (castPtr $ ptr `plusPtr`
-             fromIntegral
-               (sizeOf (undefined :: V4 CFloat) *
-                2 +
-                sizeOf (undefined :: V3 CFloat)))
+       poke (castPtr $ ptr `plusPtr` fromIntegral (sizeOf (undefined :: V4 CFloat) + sizeOf (undefined :: V3 CFloat)))
             r
 
-shadowMapResolution = 1024
+       let (dir, x, y ) = case shape of
+             Spotlight a b c -> (a, b, c)
+             Omni -> (0, 0, 0)
 
+       poke (castPtr $ ptr `plusPtr` fromIntegral (sizeOf (undefined :: V4 CFloat) * 2))
+            dir
+       poke (castPtr $ ptr `plusPtr` fromIntegral (sizeOf (undefined :: V4 CFloat) * 2 + sizeOf (undefined :: V3 CFloat)))
+            x
+       poke (castPtr $ ptr `plusPtr` fromIntegral (sizeOf (undefined :: V4 CFloat) * 3))
+            y
+
+shadowMapResolution = 1024
 
 genLightDepthMap :: IO GL.TextureObject
 genLightDepthMap =

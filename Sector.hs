@@ -123,37 +123,37 @@ buildSector Blueprint{..} =
      initializeIBO
      return $
        Sector {sectorDrawWalls =
-                         do GL.bindVertexArrayObject $=
-                              Just vao
-                            GL.drawElements GL.Triangles
-                                            (fromIntegral $ V.length wallIndices)
-                                            GL.UnsignedInt
-                                            nullPtr
-                      ,sectorDrawFloor =
-                         do GL.bindVertexArrayObject $=
-                              Just vao
-                            GL.drawElements
-                              GL.Triangles
-                              (fromIntegral $ V.length floorIndices)
-                              GL.UnsignedInt
-                              (nullPtr `plusPtr`
-                               fromIntegral
-                                 (sizeOf (0 :: Int32) *
-                                  V.length wallIndices))
-                      ,sectorDrawCeiling =
-                         do GL.bindVertexArrayObject $=
-                              Just vao
-                            GL.drawElements
-                              GL.Triangles
-                              (fromIntegral $ V.length ceilingIndices)
-                              GL.UnsignedInt
-                              (nullPtr `plusPtr`
-                               fromIntegral
-                                 (sizeOf (0 :: Int32) *
-                                  (V.length wallIndices + V.length floorIndices)))
-                      ,sectorWallMaterial = blueprintWallMaterial
-                      ,sectorFloorMaterial = blueprintFloorMaterial
-                      ,sectorCeilingMaterial = blueprintCeilingMaterial}
+                 do GL.bindVertexArrayObject $=
+                      Just vao
+                    GL.drawElements GL.Triangles
+                                    (fromIntegral $ V.length wallIndices)
+                                    GL.UnsignedInt
+                                    nullPtr
+              ,sectorDrawFloor =
+                 do GL.bindVertexArrayObject $=
+                      Just vao
+                    GL.drawElements
+                      GL.Triangles
+                      (fromIntegral $ V.length floorIndices)
+                      GL.UnsignedInt
+                      (nullPtr `plusPtr`
+                       fromIntegral
+                         (sizeOf (0 :: Int32) *
+                          V.length wallIndices))
+              ,sectorDrawCeiling =
+                 do GL.bindVertexArrayObject $=
+                      Just vao
+                    GL.drawElements
+                      GL.Triangles
+                      (fromIntegral $ V.length ceilingIndices)
+                      GL.UnsignedInt
+                      (nullPtr `plusPtr`
+                       fromIntegral
+                         (sizeOf (0 :: Int32) *
+                          (V.length wallIndices + V.length floorIndices)))
+              ,sectorWallMaterial = blueprintWallMaterial
+              ,sectorFloorMaterial = blueprintFloorMaterial
+              ,sectorCeilingMaterial = blueprintCeilingMaterial}
   where initializeVAO =
           do vao <- GL.genObjectName :: IO (GL.VertexArrayObject)
              GL.bindVertexArrayObject $=
@@ -246,7 +246,8 @@ buildSector Blueprint{..} =
                               case n of
                                 V3 x 0 y ->
                                   V3 y 0 x) <*>
-                     ZipList (repeat $ V3 0 (-1) 0) <*>
+                     ZipList (repeat $
+                              V3 0 (-1) 0) <*>
                      ZipList [V2 0 0,V2 0 v,V2 scaledLen 0,V2 scaledLen v]
         wallIndices =
           V.concatMap id $

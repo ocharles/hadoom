@@ -4,15 +4,15 @@
 {-# LANGUAGE RecordWildCards #-}
 module Main where
 
-import Prelude hiding (any, floor, ceiling, (.), id)
+import Prelude hiding (any, floor, ceiling)
 
 import Control.Applicative
 import Control.Lens hiding (indices)
 import Data.Distributive (distribute)
 import Data.Function (fix)
 import Data.Time (getCurrentTime, diffUTCTime)
-import Foreign (Ptr, Storable(..), alloca, castPtr, with)
-import Foreign.C (CFloat, withCString)
+import Foreign
+import Foreign.C
 import Graphics.Rendering.OpenGL (($=))
 import Linear as L
 import Unsafe.Coerce (unsafeCoerce)
@@ -42,18 +42,26 @@ main :: IO ()
 main =
   alloca $ \winPtr ->
   alloca $ \rendererPtr -> do
+    putStrLn "Initializing SDL"
     _ <- SDL.init SDL.initFlagEverything
     _ <- SDL.createWindowAndRenderer screenWidth screenHeight 0 winPtr rendererPtr
     win <- peek winPtr
     withCString "Hadoom" $ SDL.setWindowTitle win
+
+    putStrLn "Setting clear color"
     GL.clearColor $= GL.Color4 0 0 0 1
+    GL.get GL.errors >>= mapM_ print
 
+    putStrLn "Enabling SRGB framebuffer"
     GL.glEnable GL.gl_FRAMEBUFFER_SRGB
+    GL.get GL.errors >>= mapM_ print
 
+    putStrLn "Loading materials"
     wall1 <- Material <$> loadTexture "RoughBlockWall-ColorMap.jpg" SRGB <*> loadTexture "RoughBlockWall-NormalMap.jpg" Linear
     wall2 <- return wall1 -- Material <$> loadTexture "wall-2.jpg" <*> loadTexture "flat.jpg" Linear
     ceiling <- Material <$> loadTexture "CrustyConcrete-ColorMap.jpg" SRGB <*> loadTexture "CrustyConcrete-NormalMap.jpg" Linear
     floor <- Material <$> loadTexture "AfricanEbonyBoards-ColorMap.jpg" SRGB <*> loadTexture "AfricanEbonyBoards-NormalMap.jpg" Linear
+    GL.get GL.errors >>= mapM_ print
 
     sector1 <-
       let vertices = IM.fromList $ zip [0 ..] [V2 (-50) (-50)
@@ -96,18 +104,20 @@ main =
                               ,blueprintCeilingMaterial = ceiling
                               ,blueprintWallMaterial = wall2}
 
+    putStrLn "Loading main shader"
     shaderProg <- createShaderProgram "shaders/vertex/projection-model.glsl"
                                       "shaders/fragment/solid-white.glsl"
-
-    shadowShader <- createShaderProgram "shaders/vertex/shadow.glsl" "shaders/fragment/depth.glsl"
-
-    GL.currentProgram $= Just shaderProg
+    GL.get GL.errors >>= mapM_ print
 
     spotlightIndex <- withCString "spotlight" $
       GL.glGetSubroutineIndex (unsafeCoerce shaderProg) GL.gl_FRAGMENT_SHADER
 
     pointIndex <- withCString "omni" $
       GL.glGetSubroutineIndex (unsafeCoerce shaderProg) GL.gl_FRAGMENT_SHADER
+
+    putStrLn "Loading shadow map shader"
+    shadowShader <- createShaderProgram "shaders/vertex/shadow.glsl" "shaders/fragment/depth.glsl"
+    GL.get GL.errors >>= mapM_ print
 
     let perspective =
           let fov = 75
@@ -130,18 +140,24 @@ main =
              ,0 ,0 ,-((far * near) / (far - near)) ,1]
 
     SV.unsafeWith perspective $ \ptr -> do
+      putStrLn "Setting perspective matrix"
       GL.UniformLocation loc1 <- GL.get (GL.uniformLocation shaderProg "projection")
       GL.currentProgram $= Just shaderProg
       GL.glUniformMatrix4fv loc1 1 0 ptr
+      GL.get GL.errors >>= mapM_ print
 
     SV.unsafeWith lPerspective $ \ptr -> do
+      putStrLn "Setting light perspective matrix (main shader)"
       GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "lightProjection")
       GL.currentProgram $= Just shaderProg
       GL.glUniformMatrix4fv loc 1 0 ptr
+      GL.get GL.errors >>= mapM_ print
 
+      putStrLn "Setting light perspective matrix (shadow map shader)"
       GL.UniformLocation loc1 <- GL.get (GL.uniformLocation shadowShader "depthP")
       GL.currentProgram $= Just shadowShader
       GL.glUniformMatrix4fv loc1 1 0 ptr
+      GL.get GL.errors >>= mapM_ print
 
     let bias = [ 0.5, 0, 0, 0
                , 0, 0.5, 0, 0
@@ -149,10 +165,13 @@ main =
                , 0.5, 0.5, 0.5, 1
                ]
     SV.unsafeWith bias $ \ptr -> do
+      putStrLn "Setting bias matrix"
       GL.UniformLocation loc1 <- GL.get (GL.uniformLocation shaderProg "bias")
       GL.currentProgram $= Just shaderProg
       GL.glUniformMatrix4fv loc1 1 0 ptr
+      GL.get GL.errors >>= mapM_ print
 
+    putStrLn "Getting uniform locations"
     do GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "tex")
        GL.glUniform1i loc 0
 
@@ -164,12 +183,13 @@ main =
 
     GL.depthFunc $= Just GL.Lequal
 
-    lightsUBO <- GL.genObjectName
     shaderId <- unsafeCoerce shaderProg
-    lightsUBI <- withCString "light" $ GL.glGetUniformBlockIndex shaderId
-    GL.glUniformBlockBinding shaderId lightsUBI 0
-    GL.bindBufferRange GL.IndexedUniformBuffer 0 $= Just (lightsUBO, 0, fromIntegral (sizeOf (undefined :: Light) * 1))
+    blockIndex <- withCString "Light" $ GL.glGetUniformBlockIndex shaderId
+
+    lightsUBO <- GL.genObjectName
     GL.bindBuffer GL.UniformBuffer $= Just lightsUBO
+    GL.bindBufferBase GL.IndexedUniformBuffer blockIndex $= Just lightsUBO
+    GL.get GL.errors >>= mapM_ print
 
     tstart <- getCurrentTime
     lightFBO <- genLightFramebufferObject
@@ -198,16 +218,21 @@ main =
       GL.viewport $= (GL.Position 0 0, GL.Size shadowMapResolution shadowMapResolution)
       GL.cullFace $= Just GL.Front
       lights' <- flip V.mapM (V.zip lights lightTextures) $ \(l, t) -> do
-        GL.framebufferTexture2D GL.Framebuffer GL.DepthAttachment GL.Texture2D t 0
-        GL.clear [GL.DepthBuffer]
+        let v = {- fm33_to_m44 (romQuaternion (lightDirection l)) !*! -} mkTransformation 0 (negate (lightPos l))
+        case lightShape l of
+          Spotlight dir _ _ -> do
+            GL.framebufferTexture2D GL.Framebuffer GL.DepthAttachment GL.Texture2D t 0
+            GL.clear [GL.DepthBuffer]
 
-        let v = m33_to_m44 (fromQuaternion (lightDirection l)) !*! mkTransformation 0 (negate (lightPos l))
-        with (distribute v) $ \ptr -> do
-          GL.UniformLocation loc <- GL.get (GL.uniformLocation shadowShader "depthV")
-          GL.glUniformMatrix4fv loc 1 0 (castPtr (ptr :: Ptr (M44 CFloat)))
+            let v = {- fm33_to_m44 (romQuaternion (lightDirection l)) !*! -} mkTransformation 0 (negate (lightPos l))
+            with (distribute v) $ \ptr -> do
+              GL.UniformLocation loc <- GL.get (GL.uniformLocation shadowShader "depthV")
+              GL.glUniformMatrix4fv loc 1 0 (castPtr (ptr :: Ptr (M44 CFloat)))
 
-        case sector1 of Sector{..} -> sectorDrawWalls >> sectorDrawFloor
-        case sector2 of Sector{..} -> sectorDrawWalls >> sectorDrawFloor
+            case sector1 of Sector{..} -> sectorDrawWalls >> sectorDrawFloor
+            case sector2 of Sector{..} -> sectorDrawWalls >> sectorDrawFloor
+          Omni -> return ()
+
         return (l, t, distribute v)
 
       GL.bindFramebuffer GL.Framebuffer $= GL.defaultFramebufferObject
@@ -234,18 +259,23 @@ main =
 
         let i = case lightShape l of
                   Omni -> pointIndex
-                  Spotlight -> spotlightIndex
+                  Spotlight{} -> spotlightIndex
 
         with i $ GL.glUniformSubroutinesuiv GL.gl_FRAGMENT_SHADER 1
+        GL.get GL.errors >>= mapM_ print
 
         GL.activeTexture $= GL.TextureUnit 1
         GL.textureBinding GL.Texture2D $= Just t
 
-        with l $ \ptr ->
+        with l $ \ptr -> do
+          GL.bindBuffer GL.UniformBuffer $= Just lightsUBO
           GL.bufferData GL.UniformBuffer $= (fromIntegral (sizeOf (undefined :: Light)), ptr, GL.StreamDraw)
+
+        GL.get GL.errors >>= mapM_ print
 
         drawSectorTextured sector1
         drawSectorTextured sector2
+        GL.get GL.errors >>= mapM_ print
 
       SDL.glSwapWindow win
       again (w', newTime)) (scene, tstart)
