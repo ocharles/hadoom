@@ -29,10 +29,7 @@ scene =
   Scene <$> camera <*>
   (FRP.time <&>
    \t ->
-     [Light (V3 (-3) 0 40)
-            (V3 1 0.5 0.5)
-            150
-            Omni
+     [Light (V3 0 17 0) 1 200 Omni
      ,Light (V3 (10) 15 26)
             (V3 0.5 1 0.5)
             350

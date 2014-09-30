@@ -39,6 +39,16 @@ import Shader
 
 (screenWidth, screenHeight) = (1400, 1050)
 
+col1, col2, col3, col4 :: V.Vector (V2 CFloat)
+col1 = V.map (+ V2 (20) 20) [V2 (-2) (-2), V2 (-2) 2, V2 2 2, V2 2 (-2) ]
+col2 = V.map (+ V2 (20) (-20)) [V2 (-2) (-2), V2 (-2) 2, V2 2 2, V2 2 (-2) ]
+col3 = V.map (+ V2 (-20) 20) [V2 (-2) (-2), V2 (-2) 2, V2 2 2, V2 2 (-2) ]
+col4 = V.map (+ V2 (-20) (-20)) [V2 (-2) (-2), V2 (-2) 2, V2 2 2, V2 2 (-2) ]
+
+room = V.foldl' (flip makeSimple)
+       [V2 (-50) (-50), V2 50 (-50), V2 50 50, V2 (-50) 50 ]
+       [ col1, col2, col3, col4 ]
+
 main :: IO ()
 main =
   alloca $ \winPtr ->
@@ -48,6 +58,8 @@ main =
     _ <- SDL.createWindowAndRenderer screenWidth screenHeight 0 winPtr rendererPtr
     win <- peek winPtr
     withCString "Hadoom" $ SDL.setWindowTitle win
+
+    SDL.glSetAttribute SDL.glAttrContextProfileMask SDL.glProfileCore
 
     putStrLn "Setting clear color"
     GL.clearColor $= GL.Color4 0 0 0 1
@@ -60,9 +72,32 @@ main =
     putStrLn "Loading materials"
     wall1 <- Material <$> loadTexture "RoughBlockWall-ColorMap.jpg" SRGB <*> loadTexture "RoughBlockWall-NormalMap.jpg" Linear
     wall2 <- return wall1 -- Material <$> loadTexture "wall-2.jpg" <*> loadTexture "flat.jpg" Linear
+    light <- Material <$> loadTexture "white.jpg" SRGB <*> loadTexture "flat.jpg" Linear
     ceiling <- Material <$> loadTexture "CrustyConcrete-ColorMap.jpg" SRGB <*> loadTexture "CrustyConcrete-NormalMap.jpg" Linear
     floor <- Material <$> loadTexture "AfricanEbonyBoards-ColorMap.jpg" SRGB <*> loadTexture "AfricanEbonyBoards-NormalMap.jpg" Linear
     GL.get GL.errors >>= mapM_ print
+
+
+    sectorLargeRoom <-
+      buildSector Blueprint { blueprintVertices = IM.fromList $ zip [0..] $ V.toList room
+                            , blueprintWalls = [(0, 1), (13, 14), (14, 27), (27, 0)]
+                            , blueprintFloor = (-2)
+                            , blueprintCeiling = 20
+                            , blueprintFloorMaterial = floor
+                            , blueprintCeilingMaterial = ceiling
+                            , blueprintWallMaterial = wall1
+                            }
+
+    sectorLight <-
+      buildSector Blueprint { blueprintVertices = IM.fromList $ zip [0..]
+                                                  [V2 (-3) (-3), V2 3 (-3), V2 3 3, V2 (-3) 3]
+                            , blueprintWalls = []
+                            , blueprintFloor = -2
+                            , blueprintCeiling = 20
+                            , blueprintFloorMaterial = floor
+                            , blueprintCeilingMaterial = light
+                            , blueprintWallMaterial = wall1
+                            }
 
 
     sector3 <-
@@ -71,8 +106,18 @@ main =
       in buildSector Blueprint { blueprintVertices = vertices
                                , blueprintCeiling = 30
                                , blueprintFloor = -10
-                               , blueprintWalls = [(0, 1), (1, 2), (2, 3), (4, 5), (5, 6), (6, 7), (8, 9), (9, 10), (10, 0)]
+                               , blueprintWalls = [(0, 1), (1, 2), (2, 3), (8, 9), (9, 10), (10, 0)]
                                , blueprintFloorMaterial = floor
+                               , blueprintCeilingMaterial = ceiling
+                               , blueprintWallMaterial = wall1
+                               }
+    sector4 <-
+      let vertices = IM.fromList $ zip [0..] $ map ((* 20) . (subtract (V2 3 2))) $ [V2 2 1, V2 3 2, V2 1 2]
+      in buildSector Blueprint { blueprintVertices = vertices
+                               , blueprintCeiling = 30
+                               , blueprintFloor = -10
+                               , blueprintWalls = []
+                               , blueprintFloorMaterial = ceiling
                                , blueprintCeilingMaterial = ceiling
                                , blueprintWallMaterial = wall1
                                }
@@ -89,8 +134,7 @@ main =
                                               ,V2 30 60
                                               ,V2 10 60
                                               ,V2 10 61
-                                              ,V2 (-10) 61
-                                              ,V2 (-10) 60
+                                              ,V2 (-10) 61                                              ,V2 (-10) 60
                                               ,V2 (-40) 60
                                               ,V2 (-40) 50
                                               ,V2 (-50) 50]
@@ -103,6 +147,7 @@ main =
                               ,blueprintFloorMaterial = floor
                               ,blueprintCeilingMaterial = ceiling
                               ,blueprintWallMaterial = wall1}
+
     sector2 <-
       let vertices = IM.fromList $ zip [0 ..] [V2 (-30) 61
                                               ,V2 (-10) 61
@@ -118,7 +163,7 @@ main =
                               ,blueprintCeilingMaterial = ceiling
                               ,blueprintWallMaterial = wall2}
 
-    let sectors = [sector3]
+    let sectors = [sectorLargeRoom]--, sectorLight]
 
     putStrLn "Loading main shader"
     shaderProg <- createShaderProgram "shaders/vertex/projection-model.glsl"

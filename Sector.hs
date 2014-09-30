@@ -1,16 +1,18 @@
 {-# LANGUAGE OverloadedLists #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RecordWildCards #-}
 module Sector where
 
 import Prelude hiding (any, floor, ceiling, (.), id)
 
 import Control.Applicative
+import Data.Function (on)
 import Data.Ord (comparing)
 import Control.Category
 import Control.Lens hiding (indices)
-import Data.Foldable (any)
+import Data.Foldable (any, foldMap)
 import Data.Int (Int32)
-import Data.Monoid ((<>))
+import Data.Monoid ((<>), mempty)
 import Foreign (Storable(..), castPtr, nullPtr, plusPtr)
 import Foreign.C (CFloat)
 import Graphics.Rendering.OpenGL (($=))
@@ -21,9 +23,13 @@ import qualified Data.Vector as V
 import qualified Data.Vector.Storable as SV
 import qualified Graphics.Rendering.OpenGL as GL
 
+import Data.List.Split.Lens
 import Geometry
 import Material
 import Shader
+
+import qualified Diagrams
+import qualified Diagrams.Prelude as Diagrams
 
 data Vertex =
   Vertex {vPos :: {-# UNPACK #-} !(V3 CFloat)
@@ -107,15 +113,18 @@ makeSimple inner outer =
   let xMost = comparing (view _x)
       m = V.maximumBy xMost inner
       mIndex = V.maxIndexBy xMost inner
-      edges = V.zip outer (V.tail outer <> outer)
+      indexedOuter = V.imap (,) outer
+      edges =
+        V.zip (V.imap (,) outer)
+              (V.tail indexedOuter <> indexedOuter)
       intersections =
-        V.map (\(start,end) ->
+        V.map (\(s@(_,start),e@(_,end)) ->
                  ((rayLineIntersection m
                                        (V2 1 0)
                                        start
                                        end)
-                 ,start
-                 ,end))
+                 ,s
+                 ,e))
               edges
       (Just i,start,end) =
         V.minimumBy
@@ -127,71 +136,133 @@ makeSimple inner outer =
                (Just a,Just b) ->
                  comparing (qd m) a b)
           intersections
-      p =
-        V.maximumBy xMost
+      (pIndex,p) =
+        V.maximumBy (xMost `on` snd)
                     [start,end]
       containing =
-        V.filter (pointInTriangle m i p .
-                  snd) $
-        V.filter (not . nearZero .
-                  (subtract p) .
-                  snd) $
-        V.imap (,) outer
-      isReflex _ = True
-      angleAgainstM =
+        V.filter (\((_,a),(j,b),(_,c)) ->
+                    j /= pIndex &&
+                    triangleArea a b c <
+                    0 &&
+                    pointInTriangle m i p b) $
+        (V.zip3 indexedOuter
+                (V.drop 1 (indexedOuter <> indexedOuter))
+                (V.drop 2 (indexedOuter <> indexedOuter)))
+      angleAgainst x =
         dot (V2 1 0) .
-        subtract m
-      (minimalReflex,_) =
-        V.minimumBy (comparing (angleAgainstM . snd))
-                    (V.filter (isReflex . snd) containing)
-  in if V.null containing
-        then undefined
-        else case V.splitAt minimalReflex outer of
-               (before,after) ->
-                 before <>
-                 V.take 1 after <>
-                 V.take (succ (V.length inner))
-                        (V.drop mIndex inner <>
-                         inner) <>
-                 after
+        subtract x
+      (_,(minimalReflex,_),_) =
+        V.minimumBy
+          (\(_,(_,a),_) (_,(_,b),_) ->
+             foldMap (\f -> f a b)
+                     (comparing (angleAgainst m) :
+                      comparing (qd m) :
+                      []))
+          containing
+      splitOuter
+        -- | nearZero (i - start) = error "makeSimple: startIndex"
+        -- | nearZero (i - end) = error "makeSimple: endIndex"
+        | V.null containing = pIndex
+        | otherwise = minimalReflex
+  in case V.splitAt splitOuter outer of
+       (before,after) ->
+         before <>
+         V.take 1 after <>
+         V.take (succ (V.length inner))
+                (V.drop mIndex inner <>
+                 inner) <>
+         after
 
 triangulate :: (Epsilon a, Fractional a, Ord a) => V.Vector (V2 a) -> V.Vector Int
 triangulate = collapseAndTriangulate
-  where collapseAndTriangulate vs = go $ addIndices vs
-        takeFirst f =
-          V.take 1 .
-          V.filter f
-        isEar ((_,a),(_,b),(_,c),otherVertices) =
-          let area = triangleArea a b c
-              containsOther =
-                any (pointInTriangle a b c .
-                     snd)
-                    otherVertices
-          in area > 0 && not containsOther
-        go s
-          | V.length s < 3 = empty
-          | otherwise =
-            do (v0@(n0,_),(n1,_),v2@(n2,_),others) <- takeFirst isEar (separate s)
-               [n0,n2,n1] <>
-                 go (v0 `V.cons`
-                     (v2 `V.cons` others))
-        addIndices vertices =
-          V.zip [0 .. V.length vertices] vertices
-        separate vertices =
-          let n = V.length vertices
-              doubleVerts = vertices <> vertices
-          in V.zip4 vertices
-                    (V.drop 1 doubleVerts)
-                    (V.drop 2 doubleVerts)
-                    (V.imap (\i _ ->
-                               V.take (n - 3) $
-                               V.drop (i + 3) $
-                               doubleVerts)
-                            vertices)
-        -- collapse vs =
-        --   V.map (\i ->
-        --            let v = vs V.! i
-        --            in fst $ V.head $ V.filter (nearZero . (v -) . snd) $ V.imap (,) vs)
+  where collapseAndTriangulate vs = collapse vs $ go $ addIndices vs
+takeFirst f =
+  V.take 1 .
+  V.filter f
+isEar ((_,a),(_,b),(_,c),otherVertices) =
+  let area = triangleArea a b c
+      containsOther =
+        any (pointInTriangle a b c .
+             snd)
+            (V.filter (\(_, v) -> not (nearZero (a - v)) && not (nearZero (b - v)) && not (nearZero (c - v))) otherVertices)
+  in area > 0 && not containsOther
+go s
+  | V.length s < 3 = empty
+  | otherwise =
+    do (v0@(n0,_),(n1,_),v2@(n2,_),others) <- takeFirst isEar (separate s)
+       [n0,n2,n1] <>
+         go (v0 `V.cons`
+             (v2 `V.cons` others))
+
+go1 :: (Ord a1, Epsilon a1, Fractional a1) => V.Vector (a, V2 a1) -> (V.Vector a, V.Vector (a, V2 a1))
+go1 s
+  | V.length s < 3 = error "Done"
+  | otherwise =
+      let (v0@(n0,_),(n1,_),v2@(n2,_),others) = V.head $ takeFirst isEar (separate s)
+      in ([n2,n1,n0], (v0 `V.cons` (v2 `V.cons` others)))
+
+step vs =
+  let indexed = addIndices vs
+      goM ears s
+        | V.length s < 3 = putStrLn "Done"
+        | otherwise =
+          do let (ear,rest) = go1 s
+             Diagrams.blockDisplayingFigure $
+               let renderTriangle :: (Diagrams.Renderable (Diagrams.Path Diagrams.R2) b0)
+                                  => V2 CFloat
+                                  -> V2 CFloat
+                                  -> V2 CFloat
+                                  -> Diagrams.QDiagram b0 Diagrams.R2 Diagrams.Any
+                   renderTriangle x y z =
+                     Diagrams.lineJoin Diagrams.LineJoinRound .
+                     Diagrams.strokeLocTrail .
+                     Diagrams.mapLoc Diagrams.closeTrail .
+                     Diagrams.fromVertices $
+                     map (\(V2 x y) ->
+                            Diagrams.p2 (realToFrac x,realToFrac y))
+                         [x,y,z,x]
+                   renderEar ear =
+                     case map (vs V.!) ear of
+                       [x,y,z] ->
+                         renderTriangle x y z
+               in Diagrams.square 200 <>
+                  foldMap (\(_,(V2 x y)) ->
+                             Diagrams.translate
+                               (Diagrams.r2 (realToFrac x,realToFrac y)) $
+                             Diagrams.circle 1)
+                          (V.toList rest) <>
+                  Diagrams.lc Diagrams.red
+                              (renderEar (V.toList ear)) <>
+                  foldMap (Diagrams.fc Diagrams.yellow . renderEar)
+                          (ears ^..
+                           chunking 3 traverse) <>
+                  foldMap (\x@((_,a),(_,b),(_,c),rest) ->
+                             if isEar x
+                                then Diagrams.fc Diagrams.blue $
+                                     renderTriangle a b c
+                                else mempty)
+                          (separate rest)
+             print rest
+             goM (ears <> ear) rest
+  in goM [] indexed
+
+addIndices vertices = V.imap (,) vertices
+separate :: V.Vector a -> V.Vector (a, a, a, V.Vector a)
+separate vertices =
+  let n = V.length vertices
+      doubleVerts = vertices <> vertices
+  in V.zip4 vertices
+            (V.drop 1 doubleVerts)
+            (V.drop 2 doubleVerts)
+            (V.imap (\i _ ->
+                       V.take (n - 3) $
+                       V.drop (i + 3) $
+                       doubleVerts)
+                    vertices)
+collapse vs =
+  V.map (\i ->
+           let v = vs V.! i
+           in fst $ V.head $ V.filter (nearZero . (v -) . snd) $ V.imap (,) vs)
 
 buildSector :: Blueprint -> IO Sector
 buildSector Blueprint{..} =

@@ -19,7 +19,9 @@ executable hadoom
   build-depends:
     base >=4.7 && <4.8,
     containers,
-    criterion,
+    diagrams,
+    diagrams-gtk,
+    diagrams-lib,
     distributive,
     JuicyPixels,
     lens,
@@ -31,6 +33,8 @@ executable hadoom
     text >= 1.1.1.3 && < 1.2,
     time,
     transformers,
-    vector
+    vector,
+
+    mtl, gtk, diagrams-cairo
   default-language:    Haskell2010
   ghc-options: -Wall -rtsopts -O2
