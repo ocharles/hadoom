@@ -21,32 +21,63 @@ loadTexture :: FilePath -> ColorSpace -> IO GL.TextureObject
 loadTexture path colorSpace =
   do x <- JP.readImage path
      case x of
-       Right (JP.ImageYCbCr8 img) ->
+       Right dimg ->
          do t <- GL.genObjectName
             GL.textureBinding GL.Texture2D $=
               Just t
             GL.textureFilter GL.Texture2D $=
               ((GL.Linear',Just GL.Linear'),GL.Linear')
-            let toRgb8 =
-                  JP.convertPixel :: JP.PixelYCbCr8 -> JP.PixelRGB8
-            case JP.pixelMap toRgb8
-                             img of
-              JP.Image w h d ->
-                do SV.unsafeWith d $
-                     \ptr ->
-                       GL.texImage2D
-                         GL.Texture2D
-                         GL.NoProxy
-                         0
-                         (case colorSpace of SRGB -> GL.SRGB ; Linear -> GL.RGB32F)
-                         (GL.TextureSize2D (fromIntegral w)
-                                           (fromIntegral h))
-                         0
-                         (GL.PixelData GL.RGB GL.UnsignedByte ptr)
-                   GL.generateMipmap' GL.Texture2D
-                   GL.textureMaxAnisotropy GL.Texture2D $=
-                     16
-                   return t
+            case dimg of
+              JP.ImageRGB8 (JP.Image w h d) ->
+                SV.unsafeWith d $
+                \ptr ->
+                  GL.texImage2D
+                    GL.Texture2D
+                    GL.NoProxy
+                    0
+                    (case colorSpace of
+                       SRGB -> GL.SRGB
+                       Linear -> GL.RGB32F)
+                    (GL.TextureSize2D (fromIntegral w)
+                                      (fromIntegral h))
+                    0
+                    (GL.PixelData GL.RGB GL.UnsignedByte ptr)
+              JP.ImageRGBA8 (JP.Image w h d) ->
+                SV.unsafeWith d $
+                \ptr ->
+                  GL.texImage2D
+                    GL.Texture2D
+                    GL.NoProxy
+                    0
+                    (case colorSpace of
+                       SRGB -> GL.SRGB
+                       Linear -> GL.RGB32F)
+                    (GL.TextureSize2D (fromIntegral w)
+                                      (fromIntegral h))
+                    0
+                    (GL.PixelData GL.RGBA GL.UnsignedByte ptr)
+              JP.ImageYCbCr8 img ->
+                let toRgb8 =
+                      JP.convertPixel :: JP.PixelYCbCr8 -> JP.PixelRGB8
+                in case JP.pixelMap toRgb8 img of
+                     JP.Image w h d ->
+                       do SV.unsafeWith d $
+                            \ptr ->
+                              GL.texImage2D
+                                GL.Texture2D
+                                GL.NoProxy
+                                0
+                                (case colorSpace of
+                                   SRGB -> GL.SRGB
+                                   Linear -> GL.RGB32F)
+                                (GL.TextureSize2D (fromIntegral w)
+                                                  (fromIntegral h))
+                                0
+                                (GL.PixelData GL.RGB GL.UnsignedByte ptr)
+            GL.generateMipmap' GL.Texture2D
+            GL.textureMaxAnisotropy GL.Texture2D $=
+              16
+            return t
        Left e -> error e
        _ -> error "Unknown image format"
 

@@ -8,7 +8,7 @@ import Prelude hiding (any, floor, ceiling)
 
 import Control.Applicative
 import Control.Lens hiding (indices)
-import Control.Monad (forM_)
+import Control.Monad (forM, forM_)
 import Data.Distributive (distribute)
 import Data.Function (fix)
 import Data.Time (getCurrentTime, diffUTCTime)
@@ -37,7 +37,7 @@ import Physics
 import Sector
 import Shader
 
-(screenWidth, screenHeight) = (1400, 1050)
+(screenWidth, screenHeight) = (800, 600)
 
 col1, col2, col3, col4 :: V.Vector (V2 CFloat)
 col1 = V.map (+ V2 (20) 20) [V2 (-2) (-2), V2 (-2) 2, V2 2 2, V2 2 (-2) ]
@@ -70,12 +70,30 @@ main =
     GL.get GL.errors >>= mapM_ print
 
     putStrLn "Loading materials"
-    wall1 <- Material <$> loadTexture "RoughBlockWall-ColorMap.jpg" SRGB <*> loadTexture "RoughBlockWall-NormalMap.jpg" Linear
-    wall2 <- return wall1 -- Material <$> loadTexture "wall-2.jpg" <*> loadTexture "flat.jpg" Linear
-    light <- Material <$> loadTexture "white.jpg" SRGB <*> loadTexture "flat.jpg" Linear
+
+    wall1 <- Material <$> loadTexture "stonework-diffuse.png" SRGB
+                     <*> loadTexture "stonework-normals.png" Linear
+
+    wall2 <- Material <$> loadTexture "stonework-015_d100.png" SRGB
+                     <*> loadTexture "stonework-015_b020-p050.png" Linear
+
     ceiling <- Material <$> loadTexture "CrustyConcrete-ColorMap.jpg" SRGB <*> loadTexture "CrustyConcrete-NormalMap.jpg" Linear
-    floor <- Material <$> loadTexture "AfricanEbonyBoards-ColorMap.jpg" SRGB <*> loadTexture "AfricanEbonyBoards-NormalMap.jpg" Linear
+
+    floor <- Material <$> loadTexture "tiles.png" SRGB
+                     <*> loadTexture "tiles-normals.png" Linear
+
+    test <- Material <$> loadTexture "test-texture.jpg" SRGB <*> loadTexture "flat.jpg" Linear
+    gamma <- Material <$> loadTexture "gamma.png" SRGB <*> loadTexture "flat.jpg" Linear
     GL.get GL.errors >>= mapM_ print
+
+    -- wall1 <- return test
+    -- wall2 <- return test
+    -- floor <- return test
+    --test <- return gamma
+    --wall1 <- return test
+    --floor <- return test
+    --ceiling <- return test
+    -- wall2 <- return test
 
 
     sectorLargeRoom <-
@@ -88,82 +106,17 @@ main =
                             , blueprintWallMaterial = wall1
                             }
 
-    sectorLight <-
-      buildSector Blueprint { blueprintVertices = IM.fromList $ zip [0..]
-                                                  [V2 (-3) (-3), V2 3 (-3), V2 3 3, V2 (-3) 3]
-                            , blueprintWalls = []
-                            , blueprintFloor = -2
+    [sectorCol1, sectorCol2, sectorCol3, sectorCol4] <- forM [col1, col2, col3, col4] $ \col ->
+      buildSector Blueprint { blueprintVertices = IM.fromList $ zip [0..] $ V.toList col
+                            , blueprintWalls = [(0, 1), (1, 2), (2, 3), (3, 0)]
+                            , blueprintFloor = (-2)
                             , blueprintCeiling = 20
                             , blueprintFloorMaterial = floor
-                            , blueprintCeilingMaterial = light
+                            , blueprintCeilingMaterial = ceiling
                             , blueprintWallMaterial = wall1
                             }
 
-
-    sector3 <-
-      let vertices = IM.fromList $ zip [0.. ] $ V.toList . V.map ((* 20) . (subtract (V2 3 2))) $
-                       makeSimple ([V2 2 1, V2 1 2, V2 3 2]) [V2 0 0, V2 4 0, V2 8 5, V2 5 3, V2 3 4, V2 0 4 ]
-      in buildSector Blueprint { blueprintVertices = vertices
-                               , blueprintCeiling = 30
-                               , blueprintFloor = -10
-                               , blueprintWalls = [(0, 1), (1, 2), (2, 3), (8, 9), (9, 10), (10, 0)]
-                               , blueprintFloorMaterial = floor
-                               , blueprintCeilingMaterial = ceiling
-                               , blueprintWallMaterial = wall1
-                               }
-    sector4 <-
-      let vertices = IM.fromList $ zip [0..] $ map ((* 20) . (subtract (V2 3 2))) $ [V2 2 1, V2 3 2, V2 1 2]
-      in buildSector Blueprint { blueprintVertices = vertices
-                               , blueprintCeiling = 30
-                               , blueprintFloor = -10
-                               , blueprintWalls = []
-                               , blueprintFloorMaterial = ceiling
-                               , blueprintCeilingMaterial = ceiling
-                               , blueprintWallMaterial = wall1
-                               }
-
-    sector1 <-
-      let vertices = IM.fromList $ zip [0 ..] [V2 (-50) (-50)
-                                              ,V2 (-30) (-50)
-                                              ,V2 (-30) (-30)
-                                              ,V2 10 (-30)
-                                              ,V2 10 (-50)
-                                              ,V2 50 (-50)
-                                              ,V2 50 50
-                                              ,V2 30 50
-                                              ,V2 30 60
-                                              ,V2 10 60
-                                              ,V2 10 61
-                                              ,V2 (-10) 61                                              ,V2 (-10) 60
-                                              ,V2 (-40) 60
-                                              ,V2 (-40) 50
-                                              ,V2 (-50) 50]
-      in buildSector Blueprint {blueprintVertices = vertices
-                              ,blueprintCeiling = 30
-                              ,blueprintFloor = (-10)
-                              ,blueprintWalls = [(0,1),(1,2),(2,3),(3,4),(4,5)
-                                             ,(5,6),(6,7),(7,8),(8,9),(9,10)
-                                             ,(11,12),(12,13),(13,14),(14,0)]
-                              ,blueprintFloorMaterial = floor
-                              ,blueprintCeilingMaterial = ceiling
-                              ,blueprintWallMaterial = wall1}
-
-    sector2 <-
-      let vertices = IM.fromList $ zip [0 ..] [V2 (-30) 61
-                                              ,V2 (-10) 61
-                                              ,V2 10 61
-                                              ,V2 30 61
-                                              ,V2 30 100
-                                              ,V2 (-30) 100]
-      in buildSector Blueprint {blueprintVertices = vertices
-                              ,blueprintCeiling = 30
-                              ,blueprintFloor = (-10)
-                              ,blueprintWalls = [(0,1),(2,3),(3,4),(4,5),(5,0)]
-                              ,blueprintFloorMaterial = floor
-                              ,blueprintCeilingMaterial = ceiling
-                              ,blueprintWallMaterial = wall2}
-
-    let sectors = [sectorLargeRoom]--, sectorLight]
+    let sectors = [sectorLargeRoom, sectorCol1, sectorCol2, sectorCol3, sectorCol4]
 
     putStrLn "Loading main shader"
     shaderProg <- createShaderProgram "shaders/vertex/projection-model.glsl"
@@ -254,7 +207,7 @@ main =
 
     tstart <- getCurrentTime
     lightFBO <- genLightFramebufferObject
-    lightTextures <- V.replicateM 4 genLightDepthMap
+    lightTextures <- V.replicateM 10 genLightDepthMap
 
     fix (\again (w, currentTime) -> do
       newTime <- getCurrentTime
@@ -279,22 +232,23 @@ main =
       GL.viewport $= (GL.Position 0 0, GL.Size shadowMapResolution shadowMapResolution)
       GL.cullFace $= Just GL.Front
       lights' <- flip V.mapM (V.zip lights lightTextures) $ \(l, t) -> do
-        let v = {- fm33_to_m44 (romQuaternion (lightDirection l)) !*! -} mkTransformation 0 (negate (lightPos l))
         case lightShape l of
-          Spotlight dir _ _ -> do
+          Spotlight dir _ _ rotationMatrix -> do
             GL.framebufferTexture2D GL.Framebuffer GL.DepthAttachment GL.Texture2D t 0
             GL.clear [GL.DepthBuffer]
 
-            let v = {- fm33_to_m44 (romQuaternion (lightDirection l)) !*! -} mkTransformation 0 (negate (lightPos l))
+            let v = m33_to_m44 rotationMatrix !*! mkTransformation 0 (negate (lightPos l))
             with (distribute v) $ \ptr -> do
               GL.UniformLocation loc <- GL.get (GL.uniformLocation shadowShader "depthV")
               GL.glUniformMatrix4fv loc 1 0 (castPtr (ptr :: Ptr (M44 CFloat)))
 
             forM_ sectors $ \s ->
               case s of Sector{..} -> sectorDrawWalls >> sectorDrawFloor
-          Omni -> return ()
 
-        return (l, t, distribute v)
+            return (l, t, distribute v)
+          Omni ->
+            let v = mkTransformation 0 (negate (lightPos l))
+            in return (l, t, distribute v)
 
       GL.bindFramebuffer GL.Framebuffer $= GL.defaultFramebufferObject
       GL.cullFace $= Just GL.Back
@@ -335,8 +289,6 @@ main =
 
         -- GL.polygonMode $= (GL.Line, GL.Line)
         mapM_ drawSectorTextured sectors
-        -- drawSectorTextured sector1
-        -- drawSectorTextured sector2
         GL.get GL.errors >>= mapM_ print
 
       SDL.glSwapWindow win

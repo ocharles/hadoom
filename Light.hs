@@ -12,6 +12,7 @@ data LightShape
   | Spotlight (V3 CFloat) -- direction
               CFloat      -- full radius
               CFloat      -- penumbra radius
+              (M33 CFloat) -- rotation matrix
   deriving (Show)
 
 data Light =
@@ -35,7 +36,7 @@ instance Storable Light where
             r
 
        let (dir, x, y ) = case shape of
-             Spotlight a b c -> (a, b, c)
+             Spotlight a b c _ -> (a, b, c)
              Omni -> (0, 0, 0)
 
        poke (castPtr $ ptr `plusPtr` fromIntegral (sizeOf (undefined :: V4 CFloat) * 2))

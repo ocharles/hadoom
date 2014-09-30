@@ -378,13 +378,12 @@ buildSector Blueprint{..} =
           where expandEdge start@(V2 x1 y1) end@(V2 x2 y2) =
                   let wallV = end ^-^ start
                       wallLen = norm wallV
-                      scaledLen = wallLen * textureScaleFactor
                       n =
                         case perp (wallV ^* recip wallLen) of
                           V2 x y -> V3 x 0 y
-                      v =
-                        (blueprintCeiling - blueprintFloor) *
-                        textureScaleFactor
+                      u = wallLen / 25
+                      v = (blueprintCeiling - blueprintFloor) / 25
+
                   in V.fromList $ getZipList $ Vertex <$>
                      ZipList [V3 x1 blueprintFloor y1
                              ,V3 x1 blueprintCeiling y1
@@ -397,7 +396,7 @@ buildSector Blueprint{..} =
                                   V3 y 0 x) <*>
                      ZipList (repeat $
                               V3 0 (-1) 0) <*>
-                     ZipList [V2 0 0,V2 0 v,V2 scaledLen 0,V2 scaledLen v]
+                     ZipList [V2 0 v,V2 0 0,V2 u v,V2 u 0]
         wallIndices =
           V.concatMap id $
           V.imap (\m _ ->
@@ -410,8 +409,7 @@ buildSector Blueprint{..} =
                           (V3 0 1 0)
                           (V3 1 0 0)
                           (V3 0 0 1)
-                          (V2 x y ^*
-                           textureScaleFactor))
+                          (V2 x y ^* recip 25))
                 (V.fromList $ IM.elems blueprintVertices)
         ceilingVertices =
           V.map (\(Vertex p n t bn uv) ->

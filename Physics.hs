@@ -24,23 +24,42 @@ data Scene =
   Scene {sceneCamera :: M44 CFloat
         ,sceneLights :: V.Vector Light}
 
+lightDir :: CFloat -> V3 CFloat
+lightDir theta =
+  case inv33 (fromQuaternion (axisAngle (V3 0 1 0) theta)) of
+    Just m ->
+      m !*
+      V3 0 0 (-1) :: V3 CFloat
+
 scene :: FRP.Wire Identity [SDL.Event] Scene
 scene =
   Scene <$> camera <*>
   (FRP.time <&>
    \t ->
-     [Light (V3 0 17 0) 1 200 Omni
-     ,Light (V3 (10) 15 26)
-            (V3 0.5 1 0.5)
+     [Light (V3 0 10 0)
+            (V3 1 1 1)
+            1000
+            (Spotlight (lightDir (realToFrac t))
+                       0.8
+                       0.1
+                       (fromQuaternion
+                          (axisAngle (V3 0 1 0)
+                                     (realToFrac t))))
+     ,Light (V3 0 15 0)
+            (V3 1 1 1)
             350
-            (Spotlight (V3 0 0 (-1))
-                       (realToFrac $ cos t * 0.5 + 0.5)
-                       0.3)
-     ,Light (V3 0 15 90)
-            1
-            500
-            (Spotlight (V3 0 0 (-1)) 0.5 0.3)
-     ])
+            (Spotlight (lightDir (realToFrac (-t)))
+                       0.8
+                       0.1
+                       (fromQuaternion
+                          (axisAngle (V3 0 1 0)
+                                     (realToFrac (-t)))))
+     ,Light (V3 30 10 30) 1 30 Omni
+     ,Light (V3 (-30) 10 30) 1 30 Omni
+     ,Light (V3 (-30) 10 (-30)) 1 30 Omni
+     ,Light (V3 30 10 (-30)) 1 30 Omni
+     ,Light (V3 0 10 0) (V3 0.5 0.5 1) 40 Omni])
+-- ,
 
 camera :: FRP.Wire Identity [SDL.Event] (M44 CFloat)
 camera = proc events -> do
