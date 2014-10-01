@@ -54,11 +54,12 @@ scene =
                        (fromQuaternion
                           (axisAngle (V3 0 1 0)
                                      (realToFrac (-t)))))
-     ,Light (V3 30 10 30) 1 30 Omni
-     ,Light (V3 (-30) 10 30) 1 30 Omni
-     ,Light (V3 (-30) 10 (-30)) 1 30 Omni
-     ,Light (V3 30 10 (-30)) 1 30 Omni
-     ,Light (V3 0 10 0) (V3 0.5 0.5 1) 40 Omni])
+     ,Light (V3 0 10 30) 1 30 Omni
+     ,Light (V3 (-30) 10 0) 1 30 Omni
+     ,Light (V3 30 10 0) 1 30 Omni
+     ,Light (V3 0 10 (-30)) 1 30 Omni
+     ,Light (V3 0 10 0) (V3 0.5 0.5 1) 40 Omni
+  ])
 -- ,
 
 camera :: FRP.Wire Identity [SDL.Event] (M44 CFloat)

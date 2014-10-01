@@ -34,6 +34,8 @@ layout(std140) uniform Light {
 
 const float minLight = 0.01;
 
+const float shadowMapBias = 0.0005;
+
 void main(void) {
   vec3 fragToLight = normalize(lightEyeDirTangentSpace);
   vec3 normal = normalize(texture2D(nmap, texCoord).rgb * 2.0 - 1.0);
@@ -54,7 +56,7 @@ void main(void) {
 subroutine (lightRoutine)
 
 float spotlight() {
-  float visibility = texture(depthMap, shadowCoords.xyz / shadowCoords.w);
+  float visibility = texture(depthMap, shadowCoords.xyz / shadowCoords.w - vec3(0, 0, shadowMapBias));
   float theta = dot(lightDirEyeSpace, -normalize(lightEyeDirEyeSpace));
 
   return visibility * smoothstep(0, 1, (theta - spotlightParams.cosConeRadius) / spotlightParams.cosPenumbraRadius);

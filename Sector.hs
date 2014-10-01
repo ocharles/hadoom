@@ -378,8 +378,8 @@ buildSector Blueprint{..} =
           where expandEdge start@(V2 x1 y1) end@(V2 x2 y2) =
                   let wallV = end ^-^ start
                       wallLen = norm wallV
-                      n =
-                        case perp (wallV ^* recip wallLen) of
+                      n = normalize $
+                        case perp wallV of
                           V2 x y -> V3 x 0 y
                       u = wallLen / 25
                       v = (blueprintCeiling - blueprintFloor) / 25
@@ -390,12 +390,9 @@ buildSector Blueprint{..} =
                              ,V3 x2 blueprintFloor y2
                              ,V3 x2 blueprintCeiling y2] <*>
                      ZipList (repeat n) <*>
+                     ZipList (repeat $ normalize $ case end - start of V2 x y -> V3 x 0 y) <*>
                      ZipList (repeat $
-                              case n of
-                                V3 x 0 y ->
-                                  V3 y 0 x) <*>
-                     ZipList (repeat $
-                              V3 0 (-1) 0) <*>
+                              V3 0 1 0) <*>
                      ZipList [V2 0 v,V2 0 0,V2 u v,V2 u 0]
         wallIndices =
           V.concatMap id $
@@ -408,7 +405,7 @@ buildSector Blueprint{..} =
                    Vertex (V3 x blueprintFloor y)
                           (V3 0 1 0)
                           (V3 1 0 0)
-                          (V3 0 0 1)
+                          (V3 0 0 (-1))
                           (V2 x y ^* recip 25))
                 (V.fromList $ IM.elems blueprintVertices)
         ceilingVertices =

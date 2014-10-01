@@ -82,9 +82,16 @@ main =
     floor <- Material <$> loadTexture "tiles.png" SRGB
                      <*> loadTexture "tiles-normals.png" Linear
 
-    test <- Material <$> loadTexture "test-texture.jpg" SRGB <*> loadTexture "flat.jpg" Linear
+    test <- Material <$> loadTexture "test-texture.jpg" SRGB <*> loadTexture "debug-normals.png" Linear
+    flat <- Material <$> loadTexture "white.jpg" SRGB <*> loadTexture "flat.jpg" Linear
     gamma <- Material <$> loadTexture "gamma.png" SRGB <*> loadTexture "flat.jpg" Linear
     GL.get GL.errors >>= mapM_ print
+
+    -- test <- return flat
+    -- wall1 <- return test
+    -- wall2 <- return test
+    -- floor <- return test
+    -- ceiling <- return test
 
     -- wall1 <- return test
     -- wall2 <- return test
@@ -195,8 +202,10 @@ main =
     do GL.UniformLocation loc <- GL.get (GL.uniformLocation shaderProg "nmap")
        GL.glUniform1i loc 2
 
+    putStrLn "Setting depth test"
     GL.depthFunc $= Just GL.Lequal
 
+    putStrLn "Configuring light UBO"
     shaderId <- unsafeCoerce shaderProg
     blockIndex <- withCString "Light" $ GL.glGetUniformBlockIndex shaderId
 
@@ -206,8 +215,12 @@ main =
     GL.get GL.errors >>= mapM_ print
 
     tstart <- getCurrentTime
+    putStrLn "Generating light frame buffer"
     lightFBO <- genLightFramebufferObject
+    putStrLn "Generating light depth textures"
     lightTextures <- V.replicateM 10 genLightDepthMap
+
+    putStrLn "Looping"
 
     fix (\again (w, currentTime) -> do
       newTime <- getCurrentTime
@@ -230,7 +243,7 @@ main =
       GL.currentProgram $= Just shadowShader
       GL.bindFramebuffer GL.Framebuffer $= lightFBO
       GL.viewport $= (GL.Position 0 0, GL.Size shadowMapResolution shadowMapResolution)
-      GL.cullFace $= Just GL.Front
+      GL.cullFace $= Nothing
       lights' <- flip V.mapM (V.zip lights lightTextures) $ \(l, t) -> do
         case lightShape l of
           Spotlight dir _ _ rotationMatrix -> do

@@ -61,7 +61,7 @@ genLightDepthMap =
      GL.texImage2D GL.Texture2D
                    GL.NoProxy
                    0
-                   GL.DepthComponent16
+                   GL.DepthComponent24
                    (GL.TextureSize2D shadowMapResolution shadowMapResolution)
                    0
                    (GL.PixelData GL.DepthComponent GL.Float nullPtr)
