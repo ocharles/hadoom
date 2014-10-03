@@ -38,3 +38,31 @@ executable hadoom
     mtl, gtk, diagrams-cairo
   default-language:    Haskell2010
   ghc-options: -Wall -rtsopts -O2
+
+executable hadoom-editor
+  hs-source-dirs: editor
+  main-is: Main.hs
+  build-depends:
+    base >=4.7 && <4.8,
+    containers,
+    diagrams,
+    diagrams-gtk,
+    diagrams-lib,
+    distributive,
+    JuicyPixels,
+    lens,
+    linear,
+    OpenGL >= 2.9.2.0 && < 2.10,
+    OpenGLRaw >= 1.5 && < 1.6,
+    profunctors,
+    reactive-banana,
+    sdl2 >= 1.1.0 && < 1.2,
+    text >= 1.1.1.3 && < 1.2,
+    time,
+    transformers,
+    vector,
+    time,
+
+    mtl, gtk, diagrams-cairo
+  default-language:    Haskell2010
+  ghc-options: -Wall -rtsopts -O2
