@@ -1,3 +1,4 @@
+{-# LANGUAGE RecordWildCards #-}
 module Main where
 
 import Control.Applicative
@@ -12,6 +13,8 @@ import Reactive.Banana ((<@), (<@>))
 
 import Graphics.UI.Gtk as GTK
 
+import qualified Hadoom
+
 import qualified Diagrams.Prelude as Diagrams
 import qualified Diagrams.Backend.Cairo as Diagrams
 import qualified Diagrams.Backend.Cairo.Internal as Cairo
@@ -24,21 +27,79 @@ main =
   do _ <- GTK.initGUI
      w <- GTK.windowNew
      GTK.windowSetTitle w "Hadoom Level Editor"
-     GTK.widgetShow w
      dA <- GTK.drawingAreaNew
-     GTK.widgetSetSizeRequest dA 100 100
-     GTK.containerAdd w dA
+     GTK.widgetSetSizeRequest dA 800 800
+     vbox <- GTK.vBoxNew False 1
+     GTK.boxPackStart vbox dA GTK.PackGrow 0
      GTK.widgetShow dA
+     play <- GTK.buttonNewWithLabel "Play Hadoom"
+     GTK.boxPackStartDefaults vbox play
+     GTK.widgetShow play
+     GTK.containerAdd w vbox
+     GTK.widgetShow vbox
      GTK.widgetAddEvents
        dA
        [GTK.PointerMotionMask,GTK.PointerMotionHintMask,GTK.ButtonMotionMask]
-     RB.compile (hadoomEditorNetwork w dA) >>=
+     GTK.widgetShow w
+     RB.compile (hadoomEditorNetwork w dA play) >>=
        RB.actuate
      GTK.mainGUI
 
+type Vertex = (Double, Double)
+
+data SectorBuilder = SectorBuilder
+  { sbInProgress :: Maybe (Vertex, [Vertex])
+  , sbComplete :: [[Vertex]]
+  }
+
+emptySectorBuilder :: SectorBuilder
+emptySectorBuilder = SectorBuilder Nothing []
+
+updateSectorBuilder :: Vertex -> SectorBuilder -> SectorBuilder
+updateSectorBuilder coords sb =
+  case sbInProgress sb of
+    Nothing ->
+      sb {sbInProgress = Just (coords,[])}
+    Just (initialPoint,ps)
+      | coords /= initialPoint ->
+        sb {sbInProgress =
+              Just (initialPoint,coords : ps)}
+      | otherwise ->
+        sb {sbInProgress = Nothing
+           ,sbComplete =
+              (initialPoint : reverse ps) :
+              sbComplete sb}
+
+visualizeMap :: Vertex -> SectorBuilder -> Diagrams.Diagram Cairo.Cairo Diagrams.R2
+visualizeMap (mouseX,mouseY) sb =
+  mconcat [Diagrams.fc
+             Diagrams.red
+             (Diagrams.translate (Diagrams.r2 (mouseX,mouseY))
+                                 (Diagrams.square (1 / 5)))
+          ,foldMap (\vertices ->
+                      Diagrams.lc Diagrams.white $
+                      Diagrams.lwO 2 $
+                      Diagrams.strokeLocLoop $
+                      Diagrams.mapLoc Diagrams.closeLine $
+                      Diagrams.fromVertices $
+                      map Diagrams.p2 vertices)
+                   (sbComplete sb)
+          ,case sbInProgress sb of
+             Just (initialPoint,vertices) ->
+               Diagrams.lc Diagrams.green $
+               Diagrams.lwO 2 $
+               Diagrams.strokeLocLine $
+               Diagrams.fromVertices $
+               map Diagrams.p2
+                   (initialPoint :
+                    reverse ((mouseX,mouseY) :
+                             vertices))
+             Nothing -> mempty
+          ,gridLines]
+
 hadoomEditorNetwork :: RB.Frameworks t
-                    => GTK.Window -> GTK.DrawingArea -> RB.Moment t ()
-hadoomEditorNetwork w dA =
+                    => GTK.Window -> GTK.DrawingArea -> GTK.Button -> RB.Moment t ()
+hadoomEditorNetwork w dA play =
   do shouldRedraw <- RB.fromAddHandler $
                      withEvent (GTK.on dA GTK.exposeEvent) $
                      \h ->
@@ -63,6 +124,10 @@ hadoomEditorNetwork w dA =
                        GTK.on dA GTK.buttonPressEvent $
                        False <$
                        liftIO (h ())
+     playHadoom <- RB.fromAddHandler $ RB.AddHandler $
+                   \h ->
+                     fmap signalDisconnect $ GTK.on play GTK.buttonActivated $
+                     h ()
      let gridCoords =
            RB.stepper (0,0) $
            RB.filterJust $
@@ -87,48 +152,18 @@ hadoomEditorNetwork w dA =
                    in case ps of
                         (p:_) -> Just p
                         _ -> Nothing
-         diagram (mouseX,mouseY) (drawnLines,currentLine) =
-           mconcat [Diagrams.fc
-                       Diagrams.red
-                       (Diagrams.translate (Diagrams.r2 (mouseX,mouseY))
-                                           (Diagrams.square (1 / 5)))
-                   ,foldMap (\(start,end) ->
-                               Diagrams.lc Diagrams.white $
-                               Diagrams.lwO 2 $
-                               Diagrams.strokeLocLine $
-                               Diagrams.fromVertices
-                                 [Diagrams.p2 start,Diagrams.p2 end])
-                            drawnLines
-                   ,case currentLine of
-                      Just start ->
-                        Diagrams.lc Diagrams.green $
-                        Diagrams.lwO 2 $
-                        Diagrams.strokeLocLine $
-                        Diagrams.fromVertices
-                          [Diagrams.p2 start,Diagrams.p2 (mouseX,mouseY)]
-                      Nothing -> mempty
-                   ,gridLines]
-         lineSetChanged =
-           RB.accumE ([],Nothing)
-                     (updateLineSet <$>
+         sectorBuilderChanged =
+           RB.accumE emptySectorBuilder
+                     (updateSectorBuilder <$>
                       (gridCoords <@ mouseClicked))
-           where updateLineSet coords =
-                   \(lines,current) ->
-                     case current of
-                       Nothing ->
-                         (lines,Just coords)
-                       Just start ->
-                         ((start,coords) :
-                          lines
-                         ,Just coords)
-         lineSets =
-           RB.stepper ([],Nothing)
-                      lineSetChanged
+         sectorBuilder =
+           RB.stepper emptySectorBuilder sectorBuilderChanged
+     RB.reactimate $ Hadoom.testHadoom . head . sbComplete <$> (sectorBuilder <@ playHadoom)
      RB.reactimate $ GTK.widgetQueueDraw dA <$
-       (void mouseMoved `RB.union` void lineSetChanged)
+       (void mouseMoved `RB.union` void sectorBuilderChanged)
      RB.reactimate $ GTK.mainQuit <$ mainWindowClosed
      RB.reactimate
-       (((diagram <$> gridCoords <*> lineSets) <@
+       (((visualizeMap <$> gridCoords <*> sectorBuilder) <@
          shouldRedraw) <&>
         \d ->
           liftIO $
@@ -180,7 +215,7 @@ gridLinesIn x y = Diagrams.dashingG [1 / 20, 1 / 20] 0 $
   where len = y - x
 
 gridHalfWidth, gridHalfHeight, zoomFactor :: Double
-(gridHalfWidth, gridHalfHeight) = (1000, 1000)
+(gridHalfWidth, gridHalfHeight) = (100, 100)
 zoomFactor = 0.1
 
 gridLine :: Diagrams.Diagram Diagrams.Cairo Diagrams.R2
