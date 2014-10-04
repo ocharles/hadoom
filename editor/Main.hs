@@ -8,13 +8,11 @@ import Control.Monad.Trans (liftIO)
 import Data.Maybe
 import Data.Foldable (foldMap)
 import Data.Monoid
-
 import Reactive.Banana ((<@), (<@>))
-
-import Graphics.UI.Gtk as GTK
 
 import qualified Hadoom
 
+import qualified Graphics.UI.Gtk as GTK
 import qualified Diagrams.Prelude as Diagrams
 import qualified Diagrams.Backend.Cairo as Diagrams
 import qualified Diagrams.Backend.Cairo.Internal as Cairo
@@ -59,31 +57,34 @@ updateSectorBuilder :: Vertex -> SectorBuilder -> SectorBuilder
 updateSectorBuilder coords sb =
   case sbInProgress sb of
     Nothing ->
-      sb {sbInProgress = Just (coords,[])}
+      sb {sbInProgress = Just (coords, [])}
+
     Just (initialPoint,ps)
       | coords /= initialPoint ->
         sb {sbInProgress =
-              Just (initialPoint,coords : ps)}
+                Just (initialPoint
+                     ,coords : ps)}
       | otherwise ->
-        sb {sbInProgress = Nothing
+        sb {sbInProgress =
+                Nothing
            ,sbComplete =
-              (initialPoint : reverse ps) :
-              sbComplete sb}
+                (initialPoint : reverse ps) :
+                sbComplete sb}
 
-visualizeMap :: Vertex -> SectorBuilder -> Diagrams.Diagram Cairo.Cairo Diagrams.R2
-visualizeMap (mouseX,mouseY) sb =
+visualizeMap :: Vertex -> SectorBuilder -> [[Vertex]] -> Diagrams.Diagram Cairo.Cairo Diagrams.R2
+visualizeMap (mouseX,mouseY) sb selectedSectors =
   mconcat [Diagrams.fc
              Diagrams.red
-             (Diagrams.translate (Diagrams.r2 (mouseX,mouseY))
-                                 (Diagrams.square (1 / 5)))
-          ,foldMap (\vertices ->
-                      Diagrams.lc Diagrams.white $
-                      Diagrams.lwO 2 $
-                      Diagrams.strokeLocLoop $
-                      Diagrams.mapLoc Diagrams.closeLine $
-                      Diagrams.fromVertices $
-                      map Diagrams.p2 vertices)
+             (Diagrams.translate
+                (Diagrams.r2
+                   (mouseX
+                   ,mouseY))
+                (Diagrams.square (1 / 5)))
+          ,foldMap (Diagrams.lc Diagrams.white .
+                    Diagrams.lwO 2 .
+                    sectorDiagram)
                    (sbComplete sb)
+          ,foldMap (Diagrams.fc Diagrams.red . sectorDiagram) selectedSectors
           ,case sbInProgress sb of
              Just (initialPoint,vertices) ->
                Diagrams.lc Diagrams.green $
@@ -92,10 +93,17 @@ visualizeMap (mouseX,mouseY) sb =
                Diagrams.fromVertices $
                map Diagrams.p2
                    (initialPoint :
-                    reverse ((mouseX,mouseY) :
+                    reverse ((mouseX
+                             ,mouseY) :
                              vertices))
-             Nothing -> mempty
+
+             Nothing ->
+               mempty
           ,gridLines]
+
+sectorDiagram :: [Vertex] -> Diagrams.Diagram Cairo.Cairo Diagrams.R2
+sectorDiagram = Diagrams.strokeLocLoop . Diagrams.mapLoc Diagrams.closeLine .
+                Diagrams.fromVertices . map Diagrams.p2
 
 hadoomEditorNetwork :: RB.Frameworks t
                     => GTK.Window -> GTK.DrawingArea -> GTK.Button -> RB.Moment t ()
@@ -109,7 +117,7 @@ hadoomEditorNetwork w dA play =
                          simpleEvent (GTK.onDestroy w)
      drawableAreaResized <- RB.fromAddHandler $ RB.AddHandler $
                             \h ->
-                              fmap signalDisconnect $
+                              fmap GTK.signalDisconnect $
                               GTK.on dA GTK.sizeAllocate $
                               \(GTK.Rectangle _ _ wi hi) ->
                                 h (wi,hi)
@@ -120,60 +128,75 @@ hadoomEditorNetwork w dA play =
                      (GTK.eventCoordinates >>= liftIO . h)
      mouseClicked <- RB.fromAddHandler $ RB.AddHandler $
                      \h ->
-                       fmap signalDisconnect $
+                       fmap GTK.signalDisconnect $
                        GTK.on dA GTK.buttonPressEvent $
                        False <$
                        liftIO (h ())
      playHadoom <- RB.fromAddHandler $ RB.AddHandler $
                    \h ->
-                     fmap signalDisconnect $ GTK.on play GTK.buttonActivated $
+                     fmap GTK.signalDisconnect $ GTK.on play GTK.buttonActivated $
                      h ()
-     let gridCoords =
-           RB.stepper (0,0) $
-           RB.filterJust $
-           (toGridCoords <$>
-            RB.stepper (100,100)
-                       drawableAreaResized) <@>
-           mouseMoved
-           where toGridCoords (w,h) (x,y) =
-                   let (_,_,gridPoints) =
-                         Diagrams.adjustDia
-                           Cairo.Cairo
-                           (Cairo.CairoOptions
-                              ""
-                              (Diagrams.Dims (fromIntegral w)
-                                             (fromIntegral h))
-                              Cairo.RenderOnly
-                              False)
-                           (gridIntersections 5 5)
-                       ps =
-                         Diagrams.runQuery (Diagrams.query gridPoints)
-                                           (Diagrams.p2 (x,y))
-                   in case ps of
-                        (p:_) -> Just p
-                        _ -> Nothing
+     let widgetSize = RB.stepper (100,100) drawableAreaResized
+         gridCoords =
+           RB.stepper (0,0) . RB.filterJust $
+             toGridCoords <$> widgetSize <@> mouseMoved
          sectorBuilderChanged =
            RB.accumE emptySectorBuilder
                      (updateSectorBuilder <$>
                       (gridCoords <@ mouseClicked))
          sectorBuilder =
            RB.stepper emptySectorBuilder sectorBuilderChanged
+         selectedSectors = querySelected <$> (sbComplete <$> sectorBuilder) <*> gridCoords
      RB.reactimate $ Hadoom.testHadoom . head . sbComplete <$> (sectorBuilder <@ playHadoom)
      RB.reactimate $ GTK.widgetQueueDraw dA <$
        (void mouseMoved `RB.union` void sectorBuilderChanged)
      RB.reactimate $ GTK.mainQuit <$ mainWindowClosed
-     RB.reactimate
-       (((visualizeMap <$> gridCoords <*> sectorBuilder) <@
-         shouldRedraw) <&>
+
+     let renderChanged =
+           (visualizeMap <$> gridCoords <*> sectorBuilder <*> selectedSectors) <@ shouldRedraw
+     RB.reactimate $ renderChanged <&>
         \d ->
           liftIO $
           (Diagrams.defaultRender dA . Diagrams.bg Diagrams.black .
            Diagrams.clipped
              (Diagrams.scale zoomFactor $
-              Diagrams.square 100)) d)
+              Diagrams.square 100)) d
+
+querySelected :: [[Vertex]] -> (Double, Double) -> [[Vertex]]
+querySelected sectors xy =
+  let sectorPaths = foldMap (\s -> Diagrams.value [s] (sectorDiagram s)) sectors
+  in Diagrams.runQuery (Diagrams.query sectorPaths) (Diagrams.p2 xy)
+
+toGridCoords (w,h) (x,y) =
+  let (_,_,gridPoints) =
+        Diagrams.adjustDia
+          Cairo.Cairo
+          (Cairo.CairoOptions
+             ""
+             (Diagrams.Dims (fromIntegral w)
+                            (fromIntegral h))
+             Cairo.RenderOnly
+             False)
+          (gridIntersections 5 5)
+      ps =
+        Diagrams.runQuery
+          (Diagrams.query gridPoints)
+          (Diagrams.p2
+             (x
+             ,y))
+  in case ps of
+       (p:_) ->
+         Just p
+
+       _ ->
+         Nothing
 
 gridIntersection :: Double -> Double -> Diagrams.QDiagram Cairo.Cairo Diagrams.R2 [(Double, Double)]
-gridIntersection x y = Diagrams.value [(x, y)] $ Diagrams.translate (Diagrams.r2 (x,y)) (Diagrams.square 1)
+gridIntersection x y =
+  Diagrams.value [(x ,y)]
+    (Diagrams.translate
+       (Diagrams.r2 (x ,y))
+       (Diagrams.square 1))
 
 gridIntersections :: Double -> Double -> Diagrams.QDiagram Cairo.Cairo Diagrams.R2 [(Double, Double)]
 gridIntersections halfH halfW =
@@ -188,7 +211,7 @@ simpleEvent f = withEvent f (\h -> h ())
 withEvent f m =
   RB.AddHandler $
   \h ->
-    fmap signalDisconnect $
+    fmap GTK.signalDisconnect $
     f (m (liftIO . h))
 
 gridLines :: Diagrams.Diagram Diagrams.Cairo Diagrams.R2
