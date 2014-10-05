@@ -20,7 +20,6 @@ Library
     base >=4.7 && <4.8,
     containers,
     diagrams,
-    diagrams-gtk,
     diagrams-lib,
     distributive,
     JuicyPixels,
@@ -34,9 +33,8 @@ Library
     time,
     transformers,
     vector,
-    mtl, gtk, diagrams-cairo
+    mtl
   exposed-modules:
-    Diagrams
     FRP
     Geometry
     Hadoom
@@ -55,9 +53,6 @@ executable hadoom
   build-depends:
     base >=4.7 && <4.8,
     containers,
-    diagrams,
-    diagrams-gtk,
-    diagrams-lib,
     distributive,
     JuicyPixels,
     hadoom,
@@ -72,7 +67,7 @@ executable hadoom
     transformers,
     vector,
 
-    mtl, gtk, diagrams-cairo
+    mtl
   default-language:    Haskell2010
   ghc-options: -Wall -rtsopts -O2
 
@@ -81,9 +76,9 @@ executable hadoom-editor
   main-is: Main.hs
   build-depends:
     base >=4.7 && <4.8,
+    cairo,
     containers,
     diagrams,
-    diagrams-gtk,
     diagrams-lib,
     distributive,
     hadoom,
@@ -101,6 +96,6 @@ executable hadoom-editor
     vector,
     time,
 
-    mtl, gtk, diagrams-cairo
+    mtl, gtk3, diagrams-cairo
   default-language:    Haskell2010
   ghc-options: -Wall -rtsopts -O2

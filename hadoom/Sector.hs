@@ -28,9 +28,6 @@ import Geometry
 import Material
 import Shader
 
-import qualified Diagrams
-import qualified Diagrams.Prelude as Diagrams
-
 data Vertex =
   Vertex {vPos :: {-# UNPACK #-} !(V3 CFloat)
          ,vNorm :: {-# UNPACK #-} !(V3 CFloat)
@@ -200,51 +197,6 @@ go1 s
   | otherwise =
       let (v0@(n0,_),(n1,_),v2@(n2,_),others) = V.head $ takeFirst isEar (separate s)
       in ([n2,n1,n0], (v0 `V.cons` (v2 `V.cons` others)))
-
-step vs =
-  let indexed = addIndices vs
-      goM ears s
-        | V.length s < 3 = putStrLn "Done"
-        | otherwise =
-          do let (ear,rest) = go1 s
-             Diagrams.blockDisplayingFigure $
-               let renderTriangle :: (Diagrams.Renderable (Diagrams.Path Diagrams.R2) b0)
-                                  => V2 CFloat
-                                  -> V2 CFloat
-                                  -> V2 CFloat
-                                  -> Diagrams.QDiagram b0 Diagrams.R2 Diagrams.Any
-                   renderTriangle x y z =
-                     Diagrams.lineJoin Diagrams.LineJoinRound .
-                     Diagrams.strokeLocTrail .
-                     Diagrams.mapLoc Diagrams.closeTrail .
-                     Diagrams.fromVertices $
-                     map (\(V2 x y) ->
-                            Diagrams.p2 (realToFrac x,realToFrac y))
-                         [x,y,z,x]
-                   renderEar ear =
-                     case map (vs V.!) ear of
-                       [x,y,z] ->
-                         renderTriangle x y z
-               in Diagrams.square 200 <>
-                  foldMap (\(_,(V2 x y)) ->
-                             Diagrams.translate
-                               (Diagrams.r2 (realToFrac x,realToFrac y)) $
-                             Diagrams.circle 1)
-                          (V.toList rest) <>
-                  Diagrams.lc Diagrams.red
-                              (renderEar (V.toList ear)) <>
-                  foldMap (Diagrams.fc Diagrams.yellow . renderEar)
-                          (ears ^..
-                           chunking 3 traverse) <>
-                  foldMap (\x@((_,a),(_,b),(_,c),rest) ->
-                             if isEar x
-                                then Diagrams.fc Diagrams.blue $
-                                     renderTriangle a b c
-                                else mempty)
-                          (separate rest)
-             print rest
-             goM (ears <> ear) rest
-  in goM [] indexed
 
 addIndices vertices = V.imap (,) vertices
 separate :: V.Vector a -> V.Vector (a, a, a, V.Vector a)

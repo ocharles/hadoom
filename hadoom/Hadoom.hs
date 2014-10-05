@@ -70,13 +70,13 @@ withHadoom m =
 
     m win
 
-testHadoom :: [(Double, Double)] -> IO ()
-testHadoom vertices =
+testHadoom :: [(Double, Double)] -> FilePath -> IO ()
+testHadoom vertices wallTexture =
   withHadoom $
   \w ->
     do test <- Material <$>
-               loadTexture "test-texture.jpg" SRGB <*>
-               loadTexture "debug-normals.png" Linear
+               loadTexture wallTexture SRGB <*>
+               loadTexture "flat.jpg" Linear
        let x =
              IM.fromList $
              zip [0 ..] $
