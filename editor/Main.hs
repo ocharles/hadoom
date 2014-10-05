@@ -105,67 +105,103 @@ sectorDiagram :: [Vertex] -> Diagrams.Diagram Cairo.Cairo Diagrams.R2
 sectorDiagram = Diagrams.strokeLocLoop . Diagrams.mapLoc Diagrams.closeLine .
                 Diagrams.fromVertices . map Diagrams.p2
 
-hadoomEditorNetwork :: RB.Frameworks t
-                    => GTK.Window -> GTK.DrawingArea -> GTK.Button -> RB.Moment t ()
+hadoomEditorNetwork :: RB.Frameworks t => GTK.Window -> GTK.DrawingArea -> GTK.Button -> RB.Moment t ()
 hadoomEditorNetwork w dA play =
-  do shouldRedraw <- RB.fromAddHandler $
-                     withEvent (GTK.on dA GTK.exposeEvent) $
-                     \h ->
-                       False <$
-                       h ()
-     mainWindowClosed <- RB.fromAddHandler $
-                         simpleEvent (GTK.onDestroy w)
-     drawableAreaResized <- RB.fromAddHandler $ RB.AddHandler $
-                            \h ->
-                              fmap GTK.signalDisconnect $
-                              GTK.on dA GTK.sizeAllocate $
-                              \(GTK.Rectangle _ _ wi hi) ->
-                                h (wi,hi)
-     mouseMoved <- RB.fromAddHandler $
-                   withEvent (GTK.on dA GTK.motionNotifyEvent) $
-                   \h ->
-                     False <$
-                     (GTK.eventCoordinates >>= liftIO . h)
-     mouseClicked <- RB.fromAddHandler $ RB.AddHandler $
-                     \h ->
-                       fmap GTK.signalDisconnect $
-                       GTK.on dA GTK.buttonPressEvent $
-                       False <$
-                       liftIO (h ())
-     playHadoom <- RB.fromAddHandler $ RB.AddHandler $
-                   \h ->
-                     fmap GTK.signalDisconnect $ GTK.on play GTK.buttonActivated $
-                     h ()
-     let widgetSize = RB.stepper (100,100) drawableAreaResized
+  do shouldRedraw <-
+       RB.fromAddHandler $
+       withEvent (GTK.on dA GTK.exposeEvent) $ \h ->
+         False <$ h ()
+
+     mainWindowClosed <-
+       RB.fromAddHandler $
+       simpleEvent (GTK.onDestroy w)
+
+     drawableAreaResized <-
+       RB.fromAddHandler $ RB.AddHandler $ \h ->
+         fmap GTK.signalDisconnect $
+         GTK.on dA GTK.sizeAllocate $
+         \(GTK.Rectangle _ _ wi hi) -> h (wi,hi)
+
+     mouseMoved <-
+       RB.fromAddHandler $
+         withEvent (GTK.on dA GTK.motionNotifyEvent) $ \h ->
+           False <$ (GTK.eventCoordinates >>= liftIO . h)
+
+     mouseClicked <-
+       RB.fromAddHandler $ RB.AddHandler $ \h ->
+         fmap GTK.signalDisconnect $
+         GTK.on dA GTK.buttonPressEvent $
+         False <$ liftIO (h ())
+
+     playHadoom <-
+       RB.fromAddHandler $ RB.AddHandler $ \h ->
+         fmap GTK.signalDisconnect $ GTK.on play GTK.buttonActivated $ h ()
+
+     let zoomFactor = pure 0.1
+
+         widgetSize =
+           RB.stepper (100,100) drawableAreaResized
+
          gridCoords =
            RB.stepper (0,0) . RB.filterJust $
              toGridCoords <$> widgetSize <@> mouseMoved
+
          sectorBuilderChanged =
            RB.accumE emptySectorBuilder
                      (updateSectorBuilder <$>
                       (gridCoords <@ mouseClicked))
+
          sectorBuilder =
            RB.stepper emptySectorBuilder sectorBuilderChanged
-         selectedSectors = querySelected <$> (sbComplete <$> sectorBuilder) <*> gridCoords
-     RB.reactimate $ Hadoom.testHadoom . head . sbComplete <$> (sectorBuilder <@ playHadoom)
-     RB.reactimate $ GTK.widgetQueueDraw dA <$
-       (void mouseMoved `RB.union` void sectorBuilderChanged)
-     RB.reactimate $ GTK.mainQuit <$ mainWindowClosed
 
-     let renderChanged =
+         selectedSectors =
+           querySelected
+             <$> (sbComplete <$> sectorBuilder)
+             <*> (toDiagramCoords <$> widgetSize <*> zoomFactor <*> RB.stepper (0,0) mouseMoved)
+
+         renderChanged =
            (visualizeMap <$> gridCoords <*> sectorBuilder <*> selectedSectors) <@ shouldRedraw
-     RB.reactimate $ renderChanged <&>
-        \d ->
-          liftIO $
-          (Diagrams.defaultRender dA . Diagrams.bg Diagrams.black .
-           Diagrams.clipped
-             (Diagrams.scale zoomFactor $
-              Diagrams.square 100)) d
+
+     RB.reactimate $
+       Hadoom.testHadoom . head . sbComplete <$> (sectorBuilder <@ playHadoom)
+
+     RB.reactimate $
+       GTK.widgetQueueDraw dA <$ (void mouseMoved `RB.union` void sectorBuilderChanged)
+
+     RB.reactimate $
+       GTK.mainQuit <$ mainWindowClosed
+
+     RB.reactimate $
+       (((,) <$> zoomFactor) <@> renderChanged) <&> \(z,d) -> liftIO $
+         Diagrams.defaultRender dA $ Diagrams.bg Diagrams.black $
+         Diagrams.clipped (Diagrams.scale z $ Diagrams.square 100) $
+         d
 
 querySelected :: [[Vertex]] -> (Double, Double) -> [[Vertex]]
 querySelected sectors xy =
   let sectorPaths = foldMap (\s -> Diagrams.value [s] (sectorDiagram s)) sectors
   in Diagrams.runQuery (Diagrams.query sectorPaths) (Diagrams.p2 xy)
+
+toDiagramCoords (w,h) zoom xy =
+  let (_,t,_) =
+        Diagrams.adjustDia
+          Cairo.Cairo
+          (Cairo.CairoOptions
+             ""
+             (Diagrams.Dims (fromIntegral w)
+                            (fromIntegral h))
+             Cairo.RenderOnly
+             False)
+          (Diagrams.clipped
+             (Diagrams.scale zoom $
+              Diagrams.square 100)
+             (Diagrams.square (2 * gridHalfWidth)) :: Diagrams.Diagram Cairo.Cairo Diagrams.R2)
+  in case Diagrams.coords
+            (Diagrams.papply (Diagrams.inv t)
+                             (Diagrams.p2 xy)) of
+       x' Diagrams.:& y' ->
+         (x'
+         ,y')
 
 toGridCoords (w,h) (x,y) =
   let (_,_,gridPoints) =
@@ -237,9 +273,8 @@ gridLinesIn x y = Diagrams.dashingG [1 / 20, 1 / 20] 0 $
           [x .. y]
   where len = y - x
 
-gridHalfWidth, gridHalfHeight, zoomFactor :: Double
+gridHalfWidth, gridHalfHeight :: Double
 (gridHalfWidth, gridHalfHeight) = (100, 100)
-zoomFactor = 0.1
 
 gridLine :: Diagrams.Diagram Diagrams.Cairo Diagrams.R2
 gridLine =
