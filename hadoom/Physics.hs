@@ -1,4 +1,6 @@
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE Arrows #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedLists #-}
 module Physics where
 
@@ -10,15 +12,12 @@ import Control.Category
 import Control.Lens hiding (indices)
 import Control.Monad.Fix (MonadFix)
 import Foreign.C (CFloat)
+import Light
 import Linear as L
 
 import qualified Data.Vector as V
-import qualified Graphics.UI.SDL.Enum as SDL
-import qualified Graphics.UI.SDL.Types as SDL
-
-import Light
-
 import qualified FRP
+import qualified SDL
 
 data Scene =
   Scene {sceneCamera :: M44 CFloat
@@ -58,45 +57,61 @@ scene =
      ,Light (V3 (-30) 10 0) 1 30 Omni
      ,Light (V3 30 10 0) 1 30 Omni
      ,Light (V3 0 10 (-30)) 1 30 Omni
-     ,Light (V3 0 10 0) (V3 0.5 0.5 1) 40 Omni
-  ])
--- ,
+     ,Light (V3 0 10 0)
+            (V3 0.5 0.5 1)
+            40
+            Omni])
 
 camera :: FRP.Wire Identity [SDL.Event] (M44 CFloat)
-camera = proc events -> do
-  goForward <- keyHeld SDL.scancodeUp -< events
-  goBack <- keyHeld SDL.scancodeDown -< events
+camera =
+  proc events ->
+  do goForward <- keyHeld SDL.ScancodeUp -< events
+     goBack <- keyHeld SDL.ScancodeDown -< events
+     turnLeft <- keyHeld SDL.ScancodeLeft -< events
+     turnRight <- keyHeld SDL.ScancodeRight -< events
+     theta <- (FRP.integralWhen -< (-2, turnLeft)) +
+                (FRP.integralWhen -< (2, turnRight))
+     let quat = axisAngle (V3 0 1 0) theta
+     rec position <- if goForward then
+                       FRP.integral -< over _x negate (rotate quat (V3 0 0 1) * 10) else
+                       returnA -< position'
+         position' <- FRP.delay 0 -< position
+     returnA -<
+       m33_to_m44 (fromQuaternion quat) !*!
+         mkTransformation 0 (position - V3 0 10 0)
 
-  turnLeft <- keyHeld SDL.scancodeLeft -< events
-  turnRight <- keyHeld SDL.scancodeRight -< events
-  theta <- (FRP.integralWhen -< (-2, turnLeft)) + (FRP.integralWhen -< (2, turnRight))
-  let quat = axisAngle (V3 0 1 0) theta
+keyPressed :: (Applicative m,MonadFix m)
+           => SDL.Scancode -> FRP.Wire m [SDL.Event] Bool
+keyPressed scancode =
+  proc events ->
+  do rec pressed <- FRP.delay False -<
+                      pressed ||
+                        (filter
+                           (\case
+                                SDL.Event _ (SDL.KeyboardEvent{..}) -> keyboardEventKeyMotion ==
+                                                                         SDL.KeyDown
+                                _ -> False)
+                           events
+                           `hasScancode` scancode)
+     returnA -< pressed
 
-  rec position <- if goForward
-                   then FRP.integral -< over _x negate $ rotate quat (V3 0 0 1) * 10
-                   else returnA -< position'
-      position' <- FRP.delay 0 -< position
-
-  returnA -< m33_to_m44 (fromQuaternion quat) !*! mkTransformation 0 (position - V3 0 10 0)
-
-keyPressed :: (Applicative m, MonadFix m) => SDL.Scancode -> FRP.Wire m [SDL.Event] Bool
-keyPressed scancode = proc events -> do
-  rec pressed <- FRP.delay False -<
-                   pressed ||
-                     (filter ((== SDL.eventTypeKeyDown) . SDL.eventType) events
-                        `hasScancode` scancode)
-  returnA -< pressed
-
-keyReleased :: (Applicative m, MonadFix m) => SDL.Scancode -> FRP.Wire m [SDL.Event] Bool
+keyReleased :: (Applicative m,MonadFix m)
+            => SDL.Scancode -> FRP.Wire m [SDL.Event] Bool
 keyReleased scancode =
   proc events ->
   do rec released <- FRP.delay False -<
                        released ||
-                         (filter ((== SDL.eventTypeKeyUp) . SDL.eventType) events
+                         (filter
+                            (\case
+                                 SDL.Event _ (SDL.KeyboardEvent{..}) -> keyboardEventKeyMotion ==
+                                                                          SDL.KeyUp
+                                 _ -> False)
+                            events
                             `hasScancode` scancode)
      returnA -< released
 
-keyHeld :: (Applicative m, MonadFix m) => SDL.Scancode -> FRP.Wire m [SDL.Event] Bool
+keyHeld :: (Applicative m,MonadFix m)
+        => SDL.Scancode -> FRP.Wire m [SDL.Event] Bool
 keyHeld scancode =
   proc events ->
   do pressed <- keyPressed scancode -< events
@@ -109,6 +124,7 @@ keyHeld scancode =
 hasScancode :: [SDL.Event] -> SDL.Scancode -> Bool
 events `hasScancode` s =
   case events of
-    (SDL.KeyboardEvent _ _ _ _ _ (SDL.Keysym scancode _ _)) : xs -> scancode == s || xs `hasScancode` s
-    _ : xs -> xs `hasScancode` s
+    (SDL.Event _ (SDL.KeyboardEvent{..})):xs -> SDL.keysymScancode keyboardEventKeysym ==
+                                                  s || xs `hasScancode` s
+    _:xs -> xs `hasScancode` s
     [] -> False

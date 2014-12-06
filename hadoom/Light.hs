@@ -1,11 +1,11 @@
 module Light where
 
-import Foreign (Storable(..), allocaBytes, castPtr, nullPtr, plusPtr)
+import Foreign (Storable(..), castPtr, nullPtr, plusPtr)
 import Foreign.C (CFloat)
-import Graphics.Rendering.OpenGL (($=))
+import Graphics.GL
 import Linear as L
-
-import qualified Graphics.Rendering.OpenGL as GL
+import Material
+import Util
 
 data LightShape
   = Omni
@@ -27,50 +27,69 @@ instance Storable Light where
     sizeOf (undefined :: V4 CFloat) *
     4
   alignment _ = sizeOf (undefined :: V4 CFloat)
-  peek ptr = error "peek Light"
+  peek _ = error "peek Light"
   poke ptr (Light pos col r shape) =
     do poke (castPtr ptr) pos
-       poke (castPtr $ ptr `plusPtr` fromIntegral (sizeOf (undefined :: V4 CFloat)))
+       poke (castPtr (ptr `plusPtr`
+                      fromIntegral (sizeOf (undefined :: V4 CFloat))))
             col
-       poke (castPtr $ ptr `plusPtr` fromIntegral (sizeOf (undefined :: V4 CFloat) + sizeOf (undefined :: V3 CFloat)))
+       poke (castPtr (ptr `plusPtr`
+                      fromIntegral
+                        (sizeOf (undefined :: V4 CFloat) +
+                         sizeOf (undefined :: V3 CFloat))))
             r
-
-       let (dir, x, y ) = case shape of
-             Spotlight a b c _ -> (a, b, c)
-             Omni -> (0, 0, 0)
-
-       poke (castPtr $ ptr `plusPtr` fromIntegral (sizeOf (undefined :: V4 CFloat) * 2))
+       let (dir,x,y) =
+             case shape of
+               Spotlight a b c _ -> (a,b,c)
+               Omni -> (0,0,0)
+       poke (castPtr (ptr `plusPtr`
+                      fromIntegral
+                        (sizeOf (undefined :: V4 CFloat) *
+                         2)))
             dir
-       poke (castPtr $ ptr `plusPtr` fromIntegral (sizeOf (undefined :: V4 CFloat) * 2 + sizeOf (undefined :: V3 CFloat)))
+       poke (castPtr (ptr `plusPtr`
+                      fromIntegral
+                        (sizeOf (undefined :: V4 CFloat) *
+                         2 +
+                         sizeOf (undefined :: V3 CFloat))))
             x
-       poke (castPtr $ ptr `plusPtr` fromIntegral (sizeOf (undefined :: V4 CFloat) * 3))
+       poke (castPtr (ptr `plusPtr`
+                      fromIntegral
+                        (sizeOf (undefined :: V4 CFloat) *
+                         3)))
             y
 
+shadowMapResolution :: GLsizei
 shadowMapResolution = 1024
 
-genLightDepthMap :: IO GL.TextureObject
+genLightDepthMap :: IO GLTextureObject
 genLightDepthMap =
-  do lightDepthMap <- GL.genObjectName
-     GL.textureBinding GL.Texture2D $=
-       Just lightDepthMap
-     GL.textureCompareMode GL.Texture2D $=
-       Just GL.Lequal
-     GL.textureFilter GL.Texture2D $=
-       ((GL.Nearest,Nothing),GL.Nearest)
-     GL.textureWrapMode GL.Texture2D GL.S $= (GL.Repeated, GL.Clamp)
-     GL.texImage2D GL.Texture2D
-                   GL.NoProxy
-                   0
-                   GL.DepthComponent24
-                   (GL.TextureSize2D shadowMapResolution shadowMapResolution)
-                   0
-                   (GL.PixelData GL.DepthComponent GL.Float nullPtr)
-     return lightDepthMap
+  do lightDepthMap <- overPtr (glGenTextures 1)
+     glBindTexture GL_TEXTURE_2D lightDepthMap
+     glTexParameteri GL_TEXTURE_2D GL_TEXTURE_COMPARE_MODE GL_COMPARE_REF_TO_TEXTURE
+     glTexParameteri GL_TEXTURE_2D GL_TEXTURE_COMPARE_FUNC GL_LEQUAL
+     glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MIN_FILTER GL_NEAREST
+     glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MAG_FILTER GL_NEAREST
+     -- glTexParameteri GL_TEXTURE_2D GL_TEXTURE_WRAP
+     -- GL.textureWrapMode GL.Texture2D GL.S $=
+     --   (GL.Repeated,GL.Clamp)
+     glTexImage2D GL_TEXTURE_2D
+                  0
+                  GL_DEPTH_COMPONENT24
+                  shadowMapResolution
+                  shadowMapResolution
+                  0
+                  GL_DEPTH_COMPONENT
+                  GL_FLOAT
+                  nullPtr
+     return (GLTextureObject lightDepthMap)
 
-genLightFramebufferObject :: IO GL.FramebufferObject
+newtype GLFramebufferObject =
+  GLFramebufferObject {unGLFramebufferObject :: GLuint}
+
+genLightFramebufferObject :: IO GLFramebufferObject
 genLightFramebufferObject =
-  do lightFBO <- GL.genObjectName
-     GL.bindFramebuffer GL.Framebuffer $=
-       lightFBO
-     GL.drawBuffer $= GL.NoBuffers
-     return lightFBO
+  do lightFBO <- overPtr (glGenFramebuffers 1)
+     glBindFramebuffer GL_FRAMEBUFFER lightFBO
+     glDrawBuffer GL_NONE
+     return (GLFramebufferObject lightFBO)

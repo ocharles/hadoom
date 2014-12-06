@@ -3,49 +3,64 @@ module Shader where
 
 import Prelude hiding (any, floor, ceiling)
 
-import Control.Monad (unless)
-import Graphics.Rendering.OpenGL (($=))
+import Control.Monad (when)
+import Foreign
+import Foreign.C.String
+import Graphics.GL
+import Util
 
+import qualified Data.ByteString as BS
 import qualified Data.Text.Encoding as Text
 import qualified Data.Text.IO as Text
-import qualified Graphics.Rendering.OpenGL as GL
 
 import Paths_hadoom
 
-createShaderProgram :: FilePath -> FilePath -> IO GL.Program
+newtype GLProgram =
+  GLProgram {unGLProgram :: GLuint}
+
+createShaderProgram :: FilePath -> FilePath -> IO GLProgram
 createShaderProgram vertexShaderPath fragmentShaderPath =
-  do vertexShader <- GL.createShader GL.VertexShader
+  do vertexShader <- glCreateShader GL_VERTEX_SHADER
      compileShader vertexShaderPath vertexShader
-     fragmentShader <- GL.createShader GL.FragmentShader
+     fragmentShader <- glCreateShader GL_FRAGMENT_SHADER
      compileShader fragmentShaderPath fragmentShader
-     shaderProg <- GL.createProgram
-     GL.attachShader shaderProg vertexShader
-     GL.attachShader shaderProg fragmentShader
-     GL.attribLocation shaderProg "in_Position" $=
-       positionAttribute
-     GL.attribLocation shaderProg "in_Normal" $=
-       normalAttribute
-     GL.attribLocation shaderProg "in_Tangent" $=
-       tangentAttribute
-     GL.attribLocation shaderProg "in_Bitangent" $=
-       bitangentAttribute
-     GL.attribLocation shaderProg "in_UV" $=
-       uvAttribute
-     GL.linkProgram shaderProg
-     linked <- GL.get (GL.linkStatus shaderProg)
-     unless linked $ do
-       GL.get (GL.programInfoLog shaderProg) >>= putStrLn
-     return shaderProg
+     shaderProg <- glCreateProgram
+     glAttachShader shaderProg vertexShader
+     glAttachShader shaderProg fragmentShader
+     mapM_ (\(x,y) ->
+              withCString x
+                          (glBindAttribLocation shaderProg y))
+           [("in_Position",positionAttribute)
+           ,("in_Normal",normalAttribute)
+           ,("in_Tangent",tangentAttribute)
+           ,("in_Bitangent",bitangentAttribute)
+           ,("in_UV",uvAttribute)]
+     glLinkProgram shaderProg
+     linked <- overPtr (glGetProgramiv shaderProg GL_LINK_STATUS)
+     when (linked == GL_FALSE)
+          (do maxLength <- overPtr (glGetProgramiv shaderProg GL_INFO_LOG_LENGTH)
+              logLines <- allocaArray
+                            (fromIntegral maxLength)
+                            (\p ->
+                               alloca (\lenP ->
+                                         do glGetProgramInfoLog shaderProg maxLength lenP p
+                                            len <- peek lenP
+                                            peekCStringLen (p,fromIntegral len)))
+              putStrLn logLines)
+     return (GLProgram shaderProg)
   where compileShader path shader =
           do src <- getDataFileName path >>= Text.readFile
-             GL.shaderSourceBS shader $= Text.encodeUtf8 src
-             GL.compileShader shader
-             GL.get (GL.shaderInfoLog shader) >>=
-               putStrLn
+             BS.useAsCString
+               (Text.encodeUtf8 src)
+               (\ptr ->
+                  withArray [ptr]
+                            (\srcs ->
+                               glShaderSource shader 1 srcs nullPtr))
+             glCompileShader shader -- GL.get (GL.shaderInfoLog shader) >>= putStrLn
 
-positionAttribute, uvAttribute, normalAttribute, tangentAttribute, bitangentAttribute :: GL.AttribLocation
-positionAttribute = GL.AttribLocation 0
-normalAttribute = GL.AttribLocation 1
-tangentAttribute = GL.AttribLocation 2
-bitangentAttribute = GL.AttribLocation 3
-uvAttribute = GL.AttribLocation 4
+positionAttribute, uvAttribute, normalAttribute, tangentAttribute, bitangentAttribute :: GLuint
+positionAttribute = 0
+normalAttribute = 1
+tangentAttribute = 2
+bitangentAttribute = 3
+uvAttribute = 4
