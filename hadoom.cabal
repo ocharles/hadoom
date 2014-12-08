@@ -17,7 +17,7 @@ Data-Files:
 Library
   hs-source-dirs: hadoom
   build-depends:
-                  JuicyPixels
+                    JuicyPixels
                 , base >=4.7 && <4.8
                 , bytestring >= 0.10.4.0
                 , containers
@@ -36,16 +36,17 @@ Library
                 , transformers
                 , vector
   exposed-modules:
+    Camera
     FRP
     Geometry
     Hadoom
     Light
     Material
     Physics
-    Sector
-    Util
-    Shader
     Quine.Debug
+    Sector
+    Shader
+    Util
   other-modules:
     Paths_hadoom
   default-language:    Haskell2010

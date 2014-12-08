@@ -5,3 +5,4 @@ dist/
 *.hp
 *.ps
 *.prof
+.cabal-sandbox

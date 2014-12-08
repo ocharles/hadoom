@@ -6,6 +6,7 @@ module Physics where
 
 import Prelude hiding (any, floor, ceiling, (.), id)
 
+import Camera
 import Control.Applicative
 import Control.Arrow
 import Control.Category
@@ -67,11 +68,7 @@ camera =
   proc events ->
   do goForward <- keyHeld SDL.ScancodeUp -< events
      goBack <- keyHeld SDL.ScancodeDown -< events
-     turnLeft <- keyHeld SDL.ScancodeLeft -< events
-     turnRight <- keyHeld SDL.ScancodeRight -< events
-     theta <- (FRP.integralWhen -< (-2, turnLeft)) +
-                (FRP.integralWhen -< (2, turnRight))
-     let quat = axisAngle (V3 0 1 0) theta
+     quat <- cameraQuat -< events
      rec position <- if goForward then
                        FRP.integral -< over _x negate (rotate quat (V3 0 0 1) * 10) else
                        returnA -< position'

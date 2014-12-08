@@ -90,6 +90,7 @@ withHadoom m =
      glEnable GL_FRAMEBUFFER_SRGB
      glEnable GL_DEPTH_TEST
      Quine.installDebugHook
+     SDL.setRelativeMouseMode True
      m win
 
 testHadoom :: [(Double,Double)] -> FilePath -> IO ()
