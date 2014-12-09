@@ -33,7 +33,7 @@ lightDir theta =
 
 scene :: FRP.Wire Identity [SDL.Event] Scene
 scene =
-  Scene <$> camera <*>
+  Scene <$> worldCamera <*>
   (FRP.time <&>
    \t ->
      [Light (V3 0 10 0)
@@ -63,19 +63,17 @@ scene =
             40
             Omni])
 
-camera :: FRP.Wire Identity [SDL.Event] (M44 CFloat)
-camera =
+worldCamera :: FRP.Wire Identity [SDL.Event] (M44 CFloat)
+worldCamera =
   proc events ->
   do goForward <- keyHeld SDL.ScancodeUp -< events
-     goBack <- keyHeld SDL.ScancodeDown -< events
-     quat <- cameraQuat -< events
+     c <- camera -< events
      rec position <- if goForward then
-                       FRP.integral -< over _x negate (rotate quat (V3 0 0 1) * 10) else
+                       FRP.integral -< cameraForward c * 10 else
                        returnA -< position'
          position' <- FRP.delay 0 -< position
      returnA -<
-       m33_to_m44 (fromQuaternion quat) !*!
-         mkTransformation 0 (position - V3 0 10 0)
+       m33_to_m44 (fromQuaternion (cameraQuat c)) & translation .~ (position + V3 0 10 0)
 
 keyPressed :: (Applicative m,MonadFix m)
            => SDL.Scancode -> FRP.Wire m [SDL.Event] Bool

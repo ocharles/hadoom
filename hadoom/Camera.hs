@@ -1,29 +1,46 @@
 {-# LANGUAGE RecordWildCards #-}
-module Camera (cameraQuat) where
+{-# LANGUAGE ViewPatterns #-}
+module Camera (Camera(..), camera, cameraQuat, cameraForward) where
 
-import Control.Category
-import Prelude hiding ((.), id)
+import Control.Arrow
 import Control.Applicative
-import Control.Lens ((<&>))
+import Control.Category
+import Control.Lens (alaf)
 import Data.Foldable
 import Data.Functor.Identity
 import Data.Monoid
-import Foreign.C.Types
 import Linear
+import Prelude hiding ((.), id)
 import qualified FRP
 import qualified SDL
 
-cameraQuat :: FRP.Wire Identity [SDL.Event] (Quaternion CFloat)
-cameraQuat =
-  (id <&>
-   \(V2 yaw pitch) ->
-     axisAngle (V3 1 0 0) pitch *
-     axisAngle (V3 0 1 0) yaw) .
+data Camera a =
+  Camera {cameraPitch :: a
+         ,cameraYaw :: a}
+
+-- | A camera in its own model space.
+camera :: (Fractional a) => FRP.Wire Identity [SDL.Event] (Camera a)
+camera =
+  arr (\(V2 (negate -> cameraYaw) (negate -> cameraPitch)) ->
+         Camera {..}) .
   FRP.integral .
-  (getSum . foldMap mouseMotion . map SDL.eventPayload <$> id)
+  arr (alaf Sum foldMap (mouseMotion . SDL.eventPayload))
   where mouseMotion ev =
           case ev of
             SDL.MouseMotionEvent{..} ->
-              Sum (sensitivity *^ (fromIntegral <$> mouseMotionEventRelMotion))
-            _ -> mempty
+              sensitivity *^
+              (fromIntegral <$> mouseMotionEventRelMotion)
+            _ -> 0
         sensitivity = 0.1
+
+-- | Interpret a 'Camera' for its rotation quaternion.
+cameraQuat :: (Epsilon a,RealFloat a) => Camera a -> Quaternion a
+cameraQuat Camera{..} =
+  axisAngle (V3 0 1 0) cameraYaw *
+  axisAngle (V3 1 0 0) cameraPitch
+
+-- | Determine the forward vector in world-space for a given 'Camera'.
+cameraForward :: (Epsilon a, RealFloat a) => Camera a -> V3 a
+cameraForward c =
+  fromQuaternion (cameraQuat c) !*
+  V3 0 0 (-1)

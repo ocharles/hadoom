@@ -131,7 +131,7 @@ time = go 0
   where go x =
           Wire (\t _ -> pure (t + x,go (t + x)))
 
-integral :: (Applicative m, MonadFix m, Fractional a, Show a) => Wire m a a
+integral :: (Applicative m, MonadFix m, Fractional a) => Wire m a a
 integral =
   proc x ->
   do dt <- (-) <$> time <*> delay 0 . time -< ()

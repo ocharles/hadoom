@@ -4,6 +4,7 @@ let
     extension = self: super: {
       hadoom = self.callPackage ./. {};
       sdl2 = self.callPackage /home/ollie/work/sdl2 {};
+      linear = self.callPackage /home/ollie/work/linear {};
     };
  };
 

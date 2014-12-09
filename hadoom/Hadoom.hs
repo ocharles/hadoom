@@ -6,38 +6,36 @@
 {-# LANGUAGE RecordWildCards #-}
 module Hadoom where
 
-import Prelude hiding (any, floor, ceiling)
-
 import Control.Applicative
 import Control.Lens hiding (indices)
-import Control.Monad (forM, forM_)
+import Control.Monad (forM, forM_, guard)
 import Control.Monad.Loops (unfoldM)
 import Data.Distributive (distribute)
 import Data.Function (fix)
+import Data.Maybe (fromMaybe)
 import Data.Time (getCurrentTime, diffUTCTime)
 import Foreign
 import Foreign.C
 import Graphics.GL
+import Light
 import Linear as L
+import Material
+import Physics
+import Prelude hiding (any, floor, ceiling)
+import Sector
+import Shader
 import Unsafe.Coerce (unsafeCoerce)
 import Util
-
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Vector as V
 import qualified Data.Vector.Storable as SV
 import qualified FRP
+import qualified Quine.Debug as Quine
 import qualified SDL
 import qualified SDL.Raw.Basic as Raw
 import qualified SDL.Raw.Enum as Raw
 import qualified SDL.Raw.Event as Raw
 import qualified SDL.Raw.Types as Raw
-import qualified Quine.Debug as Quine
-
-import Light
-import Material
-import Physics
-import Sector
-import Shader
 
 (screenWidth,screenHeight) = (800,600)
 
@@ -273,7 +271,9 @@ hadoom sectors win =
                      FRP.stepWire w
                                   (realToFrac frameTime)
                                   events
-               with (distribute viewMat) $
+               with (distribute
+                       (fromMaybe (error "Failed to invert view matrix")
+                                  (inv44 viewMat))) $
                  \ptr ->
                    do loc1 <- withCString "view"
                                           (glGetUniformLocation shaderProg)
