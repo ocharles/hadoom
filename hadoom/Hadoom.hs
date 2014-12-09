@@ -7,8 +7,9 @@
 module Hadoom where
 
 import Control.Applicative
+import Control.Exception (finally)
 import Control.Lens hiding (indices)
-import Control.Monad (forM, forM_, guard)
+import Control.Monad (forM, forM_)
 import Control.Monad.Loops (unfoldM)
 import Data.Distributive (distribute)
 import Data.Function (fix)
@@ -32,54 +33,38 @@ import qualified Data.Vector.Storable as SV
 import qualified FRP
 import qualified Quine.Debug as Quine
 import qualified SDL
-import qualified SDL.Raw.Basic as Raw
-import qualified SDL.Raw.Enum as Raw
-import qualified SDL.Raw.Event as Raw
-import qualified SDL.Raw.Types as Raw
 
+screenWidth, screenHeight :: GLsizei
 (screenWidth,screenHeight) = (800,600)
 
-col1, col2, col3, col4 :: V.Vector (V2 CFloat)
-col1 =
-  V.map (+ V2 (20) 20)
-        [V2 (-2)
-            (-2)
-        ,V2 (-2) 2
-        ,V2 2 2
-        ,V2 2 (-2)]
-col2 =
-  V.map (+ V2 (20)
-              (-20))
-        [V2 (-2)
-            (-2)
-        ,V2 (-2) 2
-        ,V2 2 2
-        ,V2 2 (-2)]
-col3 =
-  V.map (+ V2 (-20) 20)
-        [V2 (-2)
-            (-2)
-        ,V2 (-2) 2
-        ,V2 2 2
-        ,V2 2 (-2)]
-col4 =
-  V.map (+ V2 (-20)
-              (-20))
-        [V2 (-2)
-            (-2)
-        ,V2 (-2) 2
-        ,V2 2 2
-        ,V2 2 (-2)]
+col :: V.Vector (V2 CFloat)
+col =
+  [V2 (-0.3)
+      (-0.3)
+  ,V2 (-0.3) 0.3
+  ,V2 0.3 0.3
+  ,V2 0.3 (-0.3)]
 
+col1, col2, col3, col4 :: V.Vector (V2 CFloat)
+col1 = V.map (+ V2 2.5 2.5) col
+col2 = V.map (+ V2 2.5 (-2.5)) col
+col3 = V.map (+ V2 (-2.5) 2.5) col
+col4 =
+  V.map (+ V2 (-2.5)
+              (-2.5))
+        col
+
+room :: V.Vector (V2 CFloat)
 room =
   V.foldl' (flip makeSimple)
-           [V2 (-50)
-               (-50)
-           ,V2 50 (-50)
-           ,V2 50 50
-           ,V2 (-50) 50]
+           [V2 (-5)
+               (-5)
+           ,V2 5 (-5)
+           ,V2 5 5
+           ,V2 (-5) 5]
            [col1,col2,col3,col4]
 
+withHadoom :: (SDL.Window -> IO b) -> IO b
 withHadoom m =
   do _ <- SDL.initialize ([SDL.InitEverything] :: [SDL.InitFlag])
      win <- SDL.createWindow
@@ -97,7 +82,7 @@ withHadoom m =
      glEnable GL_DEPTH_TEST
      Quine.installDebugHook
      SDL.setRelativeMouseMode True
-     m win
+     m win `finally` SDL.destroyRenderer renderer
 
 testHadoom :: [(Double,Double)] -> FilePath -> IO ()
 testHadoom vertices wallTexture =
@@ -109,10 +94,10 @@ testHadoom vertices wallTexture =
           let x =
                 IM.fromList
                   (zip [0 ..]
-                       (map (\(x,y) ->
+                       (map (\(vx,vy) ->
                                realToFrac <$>
-                               V2 (x * 10)
-                                  (y * 10))
+                               V2 (vx * 10)
+                                  (vy * 10))
                             vertices))
           print x
           sector <- buildSector
@@ -122,9 +107,8 @@ testHadoom vertices wallTexture =
                                      (let i =
                                             [0 .. length vertices - 1]
                                       in zip i (tail i ++ i))
-                                ,blueprintFloor =
-                                   (-2)
-                                ,blueprintCeiling = 20
+                                ,blueprintFloor = 0
+                                ,blueprintCeiling = 3
                                 ,blueprintFloorMaterial = test
                                 ,blueprintCeilingMaterial = test
                                 ,blueprintWallMaterial = test}
@@ -137,24 +121,12 @@ playHadoom =
        do wall1 <- Material <$>
                    loadTexture "stonework-diffuse.png" SRGB <*>
                    loadTexture "stonework-normals.png" Linear
-          wall2 <- Material <$>
-                   loadTexture "stonework-015_d100.png" SRGB <*>
-                   loadTexture "stonework-015_b020-p050.png" Linear
           ceiling <- Material <$>
                      loadTexture "CrustyConcrete-ColorMap.jpg" SRGB <*>
                      loadTexture "CrustyConcrete-NormalMap.jpg" Linear
           floor <- Material <$>
                    loadTexture "tiles.png" SRGB <*>
                    loadTexture "tiles-normals.png" Linear
-          test <- Material <$>
-                  loadTexture "test-texture.jpg" SRGB <*>
-                  loadTexture "debug-normals.png" Linear
-          flat <- Material <$>
-                  loadTexture "white.jpg" SRGB <*>
-                  loadTexture "flat.jpg" Linear
-          gamma <- Material <$>
-                   loadTexture "gamma.png" SRGB <*>
-                   loadTexture "flat.jpg" Linear
           sectorLargeRoom <- buildSector
                                Blueprint {blueprintVertices =
                                             IM.fromList
@@ -162,9 +134,8 @@ playHadoom =
                                                    (V.toList room))
                                          ,blueprintWalls =
                                             [(0,1),(13,14),(14,27),(27,0)]
-                                         ,blueprintFloor =
-                                            (-2)
-                                         ,blueprintCeiling = 20
+                                         ,blueprintFloor = 0
+                                         ,blueprintCeiling = 3
                                          ,blueprintFloorMaterial = floor
                                          ,blueprintCeilingMaterial = ceiling
                                          ,blueprintWallMaterial = wall1}
@@ -189,13 +160,13 @@ playHadoom =
                                                                                    ,0)]
                                                                                ,blueprintFloor =
                                                                                   (-2)
-                                                                               ,blueprintCeiling = 20
+                                                                               ,blueprintCeiling = 3
                                                                                ,blueprintFloorMaterial = floor
                                                                                ,blueprintCeilingMaterial = ceiling
                                                                                ,blueprintWallMaterial = wall1})
           hadoom [sectorLargeRoom,sectorCol1,sectorCol2,sectorCol3,sectorCol4] w)
 
-
+hadoom :: [Sector] -> SDL.Window -> IO b
 hadoom sectors win =
   do shaderProg <- unGLProgram <$>
                    createShaderProgram "shaders/vertex/projection-model.glsl"

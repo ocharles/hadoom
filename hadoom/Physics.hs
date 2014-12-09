@@ -36,32 +36,33 @@ scene =
   Scene <$> worldCamera <*>
   (FRP.time <&>
    \t ->
-     [Light (V3 0 10 0)
+     [Light (V3 0 2 0)
             (V3 1 1 1)
             1000
-            (Spotlight (lightDir (realToFrac t))
+            (Spotlight (lightDir (realToFrac (pi / 4)))
                        0.8
                        0.1
                        (fromQuaternion
                           (axisAngle (V3 0 1 0)
-                                     (realToFrac t))))
-     ,Light (V3 0 15 0)
-            (V3 1 1 1)
-            350
-            (Spotlight (lightDir (realToFrac (-t)))
-                       0.8
-                       0.1
-                       (fromQuaternion
-                          (axisAngle (V3 0 1 0)
-                                     (realToFrac (-t)))))
-     ,Light (V3 0 10 30) 1 30 Omni
-     ,Light (V3 (-30) 10 0) 1 30 Omni
-     ,Light (V3 30 10 0) 1 30 Omni
-     ,Light (V3 0 10 (-30)) 1 30 Omni
-     ,Light (V3 0 10 0)
-            (V3 0.5 0.5 1)
-            40
-            Omni])
+                                     (realToFrac (pi / 4)))))
+     -- ,Light (V3 0 2 0)
+     --        (V3 1 1 1)
+     --        350
+     --        (Spotlight (lightDir (realToFrac (-t)))
+     --                   0.8
+     --                   0.1
+     --                   (fromQuaternion
+     --                      (axisAngle (V3 0 1 0)
+     --                                 (realToFrac (-t)))))
+     ,Light (V3 0 2 3) 1 3 Omni
+     ,Light (V3 (-3) 2 0) 1 3 Omni
+     ,Light (V3 3 2 0) 1 3 Omni
+     ,Light (V3 0 2 (-3)) 1 3 Omni
+            ])
+     -- ,Light (V3 0 2 0)
+     --        (V3 0.5 0.5 1)
+     --        10
+     --        Omni])
 
 worldCamera :: FRP.Wire Identity [SDL.Event] (M44 CFloat)
 worldCamera =
@@ -73,7 +74,7 @@ worldCamera =
                        returnA -< position'
          position' <- FRP.delay 0 -< position
      returnA -<
-       m33_to_m44 (fromQuaternion (cameraQuat c)) & translation .~ (position + V3 0 10 0)
+       m33_to_m44 (fromQuaternion (cameraQuat c)) & translation .~ (position + V3 0 1.75 0)
 
 keyPressed :: (Applicative m,MonadFix m)
            => SDL.Scancode -> FRP.Wire m [SDL.Event] Bool

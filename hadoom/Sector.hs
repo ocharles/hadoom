@@ -337,10 +337,10 @@ buildSector Blueprint{..} =
                         normalize (case perp wallV of
                                      V2 x y ->
                                        V3 x 0 y)
-                      u = wallLen / 25
+                      u = wallLen / textureSize
                       v =
                         (blueprintCeiling - blueprintFloor) /
-                        25
+                        textureSize
                   in V.fromList
                        (getZipList
                           (Vertex <$>
@@ -368,7 +368,7 @@ buildSector Blueprint{..} =
                           (V3 1 0 0)
                           (V3 0 0 (-1))
                           (V2 x y ^*
-                           recip 25))
+                           recip textureSize))
                 (V.fromList (IM.elems blueprintVertices))
         ceilingVertices =
           V.map (\(Vertex p n t bn uv) ->
@@ -408,6 +408,8 @@ buildSector Blueprint{..} =
                         sizeOf (0 :: Int32)))
                     (castPtr indicesPtr)
                     GL_STATIC_DRAW)
+
+textureSize = 2.5
 
 drawSectorTextured :: Sector -> IO ()
 drawSectorTextured Sector{..} =
