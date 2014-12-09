@@ -36,7 +36,7 @@ const float minLight = 0.01;
 
 // Determined by bisecting 0.0001 and 0.001, and visually inspecting each step.
 // This comes out looking pretty good.
-const float shadowMapBias = 0.0005625;
+const float shadowMapBias = 0.0008875;
 
 void main(void) {
   vec3 fragToLight = normalize(lightEyeDirTangentSpace);
