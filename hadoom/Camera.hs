@@ -41,6 +41,6 @@ cameraQuat Camera{..} =
 
 -- | Determine the forward vector in world-space for a given 'Camera'.
 cameraForward :: (Epsilon a, RealFloat a) => Camera a -> V3 a
-cameraForward c =
-  fromQuaternion (cameraQuat c) !*
+cameraForward Camera{..} =
+  fromQuaternion (axisAngle (V3 0 1 0) cameraYaw) !*
   V3 0 0 (-1)
