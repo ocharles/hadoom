@@ -31,6 +31,14 @@ loadTexture path colorSpace =
             glBindTexture GL_TEXTURE_2D t
             glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MIN_FILTER GL_LINEAR
             glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MAG_FILTER GL_LINEAR
+            glPixelStorei GL_UNPACK_LSB_FIRST 0
+            glPixelStorei GL_UNPACK_SWAP_BYTES 0
+            glPixelStorei GL_UNPACK_ROW_LENGTH 0
+            glPixelStorei GL_UNPACK_IMAGE_HEIGHT 0
+            glPixelStorei GL_UNPACK_SKIP_ROWS 0
+            glPixelStorei GL_UNPACK_SKIP_PIXELS 0
+            glPixelStorei GL_UNPACK_SKIP_IMAGES 0
+            glPixelStorei GL_UNPACK_ALIGNMENT 1
             case dimg of
               JP.ImageRGB8 (JP.Image w h d) ->
                 SV.unsafeWith
