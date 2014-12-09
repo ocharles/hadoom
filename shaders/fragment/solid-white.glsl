@@ -34,7 +34,9 @@ layout(std140) uniform Light {
 
 const float minLight = 0.01;
 
-const float shadowMapBias = 0.0005;
+// Determined by bisecting 0.0001 and 0.001, and visually inspecting each step.
+// This comes out looking pretty good.
+const float shadowMapBias = 0.0005625;
 
 void main(void) {
   vec3 fragToLight = normalize(lightEyeDirTangentSpace);
