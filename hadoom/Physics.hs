@@ -67,14 +67,20 @@ scene =
 worldCamera :: FRP.Wire Identity [SDL.Event] (M44 CFloat)
 worldCamera =
   proc events ->
-  do goForward <- keyHeld SDL.ScancodeUp -< events
+  do goForward <- keyHeld SDL.ScancodeW -< events
+     goBackward <- keyHeld SDL.ScancodeS -< events
      c <- camera -< events
-     rec position <- if goForward then
+     rec forward <- if goForward then
                        FRP.integral -< cameraForward c * 10 else
-                       returnA -< position'
-         position' <- FRP.delay 0 -< position
+                       returnA -< forward'
+         forward' <- FRP.delay 0 -< forward
+
+         backward <- if goBackward then
+                       FRP.integral -< negate (cameraForward c * 10) else
+                       returnA -< backward'
+         backward' <- FRP.delay 0 -< backward
      returnA -<
-       m33_to_m44 (fromQuaternion (cameraQuat c)) & translation .~ (position + V3 0 1.75 0)
+       m33_to_m44 (fromQuaternion (cameraQuat c)) & translation .~ (forward + backward + V3 0 1.75 0)
 
 keyPressed :: (Applicative m,MonadFix m)
            => SDL.Scancode -> FRP.Wire m [SDL.Event] Bool
