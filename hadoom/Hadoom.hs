@@ -42,32 +42,39 @@ import qualified SDL.Raw.Types as Raw
 col1, col2, col3, col4 :: V.Vector (V2 CFloat)
 col1 =
   V.map (+ V2 (20) 20)
-        [V2 (-2) (-2)
+        [V2 (-2)
+            (-2)
         ,V2 (-2) 2
         ,V2 2 2
         ,V2 2 (-2)]
 col2 =
-  V.map (+ V2 (20) (-20))
-        [V2 (-2) (-2)
+  V.map (+ V2 (20)
+              (-20))
+        [V2 (-2)
+            (-2)
         ,V2 (-2) 2
         ,V2 2 2
         ,V2 2 (-2)]
 col3 =
   V.map (+ V2 (-20) 20)
-        [V2 (-2) (-2)
+        [V2 (-2)
+            (-2)
         ,V2 (-2) 2
         ,V2 2 2
         ,V2 2 (-2)]
 col4 =
-  V.map (+ V2 (-20) (-20))
-        [V2 (-2) (-2)
+  V.map (+ V2 (-20)
+              (-20))
+        [V2 (-2)
+            (-2)
         ,V2 (-2) 2
         ,V2 2 2
         ,V2 2 (-2)]
 
 room =
   V.foldl' (flip makeSimple)
-           [V2 (-50) (-50)
+           [V2 (-50)
+               (-50)
            ,V2 50 (-50)
            ,V2 50 50
            ,V2 (-50) 50]
@@ -80,7 +87,8 @@ withHadoom m =
               SDL.defaultWindow {SDL.windowSize =
                                    V2 800 600
                                 ,SDL.windowOpenGL =
-                                   Just (SDL.defaultOpenGL {SDL.glProfile = SDL.Core SDL.Debug 3 2})}
+                                   Just (SDL.defaultOpenGL {SDL.glProfile =
+                                                              SDL.Core SDL.Debug 3 2})}
      renderer <- SDL.createRenderer win
                                     (-1)
                                     SDL.defaultRenderer
@@ -163,28 +171,28 @@ playHadoom =
           [sectorCol1,sectorCol2,sectorCol3,sectorCol4] <- forM [col1
                                                                 ,col2
                                                                 ,col3
-                                                                ,col4] $
-                                                           \col ->
-                                                             buildSector
-                                                               Blueprint {blueprintVertices =
-                                                                            IM.fromList $
-                                                                            zip [0 ..] $
-                                                                            V.toList col
-                                                                         ,blueprintWalls =
-                                                                            [(0
-                                                                             ,1)
-                                                                            ,(1
-                                                                             ,2)
-                                                                            ,(2
-                                                                             ,3)
-                                                                            ,(3
-                                                                             ,0)]
-                                                                         ,blueprintFloor =
-                                                                            (-2)
-                                                                         ,blueprintCeiling = 20
-                                                                         ,blueprintFloorMaterial = floor
-                                                                         ,blueprintCeilingMaterial = ceiling
-                                                                         ,blueprintWallMaterial = wall1}
+                                                                ,col4]
+                                                                (\col ->
+                                                                   buildSector
+                                                                     Blueprint {blueprintVertices =
+                                                                                  IM.fromList
+                                                                                    (zip [0 ..]
+                                                                                         (V.toList col))
+                                                                               ,blueprintWalls =
+                                                                                  [(0
+                                                                                   ,1)
+                                                                                  ,(1
+                                                                                   ,2)
+                                                                                  ,(2
+                                                                                   ,3)
+                                                                                  ,(3
+                                                                                   ,0)]
+                                                                               ,blueprintFloor =
+                                                                                  (-2)
+                                                                               ,blueprintCeiling = 20
+                                                                               ,blueprintFloorMaterial = floor
+                                                                               ,blueprintCeilingMaterial = ceiling
+                                                                               ,blueprintWallMaterial = wall1})
           hadoom [sectorLargeRoom,sectorCol1,sectorCol2,sectorCol3,sectorCol4] w)
 
 
@@ -192,10 +200,10 @@ hadoom sectors win =
   do shaderProg <- unGLProgram <$>
                    createShaderProgram "shaders/vertex/projection-model.glsl"
                                        "shaders/fragment/solid-white.glsl"
-     spotlightIndex <- withCString "spotlight" $
-                       glGetSubroutineIndex shaderProg GL_FRAGMENT_SHADER
-     pointIndex <- withCString "omni" $
-                   glGetSubroutineIndex shaderProg GL_FRAGMENT_SHADER
+     spotlightIndex <- withCString "spotlight"
+                                   (glGetSubroutineIndex shaderProg GL_FRAGMENT_SHADER)
+     pointIndex <- withCString "omni"
+                               (glGetSubroutineIndex shaderProg GL_FRAGMENT_SHADER)
      shadowShader <- unGLProgram <$>
                      createShaderProgram "shaders/vertex/shadow.glsl" "shaders/fragment/depth.glsl"
      let perspectiveMat :: M44 GLfloat
@@ -210,39 +218,40 @@ hadoom sectors win =
                        (4 / 3)
                        1
                        100
-     with perspectiveMat $
-       \ptr ->
-         do loc1 <- withCString "projection"
-                                (glGetUniformLocation shaderProg)
-            glUseProgram shaderProg
-            glUniformMatrix4fv loc1
-                               1
-                               0
-                               (castPtr ptr)
-     with lPerspective $
-       \ptr ->
-         do loc <- withCString "lightProjection"
-                               (glGetUniformLocation shaderProg)
-            glUseProgram shaderProg
-            glUniformMatrix4fv loc
-                               1
-                               0
-                               (castPtr ptr)
-            loc1 <- withCString "depthP"
-                                (glGetUniformLocation shadowShader)
-            glUseProgram shadowShader
-            glUniformMatrix4fv loc1
-                               1
-                               0
-                               (castPtr ptr)
+     with perspectiveMat
+          (\ptr ->
+             do loc1 <- withCString "projection"
+                                    (glGetUniformLocation shaderProg)
+                glUseProgram shaderProg
+                glUniformMatrix4fv loc1
+                                   1
+                                   0
+                                   (castPtr ptr))
+     with lPerspective
+          (\ptr ->
+             do loc <- withCString "lightProjection"
+                                   (glGetUniformLocation shaderProg)
+                glUseProgram shaderProg
+                glUniformMatrix4fv loc
+                                   1
+                                   0
+                                   (castPtr ptr)
+                loc1 <- withCString "depthP"
+                                    (glGetUniformLocation shadowShader)
+                glUseProgram shadowShader
+                glUniformMatrix4fv loc1
+                                   1
+                                   0
+                                   (castPtr ptr))
      let bias =
            [0.5,0,0,0,0,0.5,0,0,0,0,0.5,0,0.5,0.5,0.5,1]
-     SV.unsafeWith bias $
-       \ptr ->
-         do loc1 <- withCString "bias"
-                                (glGetUniformLocation shaderProg)
-            glUseProgram shaderProg
-            glUniformMatrix4fv loc1 1 0 ptr
+     SV.unsafeWith
+       bias
+       (\ptr ->
+          do loc1 <- withCString "bias"
+                                 (glGetUniformLocation shaderProg)
+             glUseProgram shaderProg
+             glUniformMatrix4fv loc1 1 0 ptr)
      do loc <- withCString "tex"
                            (glGetUniformLocation shaderProg)
         glUniform1i loc 0
@@ -254,8 +263,8 @@ hadoom sectors win =
         glUniform1i loc 2
      glDepthFunc GL_LEQUAL
      shaderId <- unsafeCoerce shaderProg
-     blockIndex <- withCString "Light" $
-                   glGetUniformBlockIndex shaderId
+     blockIndex <- withCString "Light"
+                               (glGetUniformBlockIndex shaderId)
      lightsUBO <- overPtr (glGenBuffers 1)
      glBindBuffer GL_UNIFORM_BUFFER lightsUBO
      glBindBufferBase GL_UNIFORM_BUFFER blockIndex lightsUBO
@@ -267,21 +276,21 @@ hadoom sectors win =
                let frameTime = newTime `diffUTCTime` currentTime
                events <- unfoldM SDL.pollEvent
                let (Scene viewMat lights,w') =
-                     runIdentity $
-                     FRP.stepWire w
-                                  (realToFrac frameTime)
-                                  events
+                     runIdentity
+                       (FRP.stepWire w
+                                     (realToFrac frameTime)
+                                     events)
                with (distribute
                        (fromMaybe (error "Failed to invert view matrix")
-                                  (inv44 viewMat))) $
-                 \ptr ->
-                   do loc1 <- withCString "view"
-                                          (glGetUniformLocation shaderProg)
-                      glUseProgram shaderProg
-                      glUniformMatrix4fv loc1
-                                         1
-                                         0
-                                         (castPtr (ptr :: Ptr (M44 CFloat)))
+                                  (inv44 viewMat)))
+                    (\ptr ->
+                       do loc1 <- withCString "view"
+                                              (glGetUniformLocation shaderProg)
+                          glUseProgram shaderProg
+                          glUniformMatrix4fv loc1
+                                             1
+                                             0
+                                             (castPtr (ptr :: Ptr (M44 CFloat))))
                glDisable GL_BLEND
                glDepthMask GL_TRUE
                glDepthFunc GL_LEQUAL
@@ -290,39 +299,40 @@ hadoom sectors win =
                glBindFramebuffer GL_FRAMEBUFFER lightFBO
                glViewport 0 0 shadowMapResolution shadowMapResolution
                glDisable GL_CULL_FACE
-               lights' <- flip V.mapM (V.zip lights lightTextures) $
-                          \(l,GLTextureObject t) ->
-                            do case lightShape l of
-                                 Spotlight dir _ _ rotationMatrix ->
-                                   do glFramebufferTexture2D GL_FRAMEBUFFER
-                                                             GL_DEPTH_ATTACHMENT
-                                                             GL_TEXTURE_2D
-                                                             t
-                                                             0
-                                      glClear GL_DEPTH_BUFFER_BIT
-                                      let v =
-                                            m33_to_m44 rotationMatrix !*!
-                                            mkTransformation 0
-                                                             (negate (lightPos l))
-                                      with (distribute v) $
-                                        \ptr ->
-                                          do loc <- withCString "depthV"
-                                                                (glGetUniformLocation shadowShader)
-                                             glUniformMatrix4fv loc
-                                                                1
-                                                                0
-                                                                (castPtr (ptr :: Ptr (M44 CFloat)))
-                                      forM_ sectors $
-                                        \s ->
-                                          case s of
-                                            Sector{..} -> sectorDrawWalls >>
-                                                            sectorDrawFloor
-                                      return (l,t,distribute v)
-                                 Omni ->
-                                   let v =
-                                         mkTransformation 0
-                                                          (negate (lightPos l))
-                                   in return (l,t,distribute v)
+               lights' <- flip V.mapM
+                               (V.zip lights lightTextures)
+                               (\(l,GLTextureObject t) ->
+                                  do case lightShape l of
+                                       Spotlight dir _ _ rotationMatrix ->
+                                         do glFramebufferTexture2D GL_FRAMEBUFFER
+                                                                   GL_DEPTH_ATTACHMENT
+                                                                   GL_TEXTURE_2D
+                                                                   t
+                                                                   0
+                                            glClear GL_DEPTH_BUFFER_BIT
+                                            let v =
+                                                  m33_to_m44 rotationMatrix !*!
+                                                  mkTransformation 0
+                                                                   (negate (lightPos l))
+                                            with (distribute v)
+                                                 (\ptr ->
+                                                    do loc <- withCString "depthV"
+                                                                          (glGetUniformLocation shadowShader)
+                                                       glUniformMatrix4fv loc
+                                                                          1
+                                                                          0
+                                                                          (castPtr (ptr :: Ptr (M44 CFloat))))
+                                            forM_ sectors
+                                                  (\s ->
+                                                     case s of
+                                                       Sector{..} -> sectorDrawWalls >>
+                                                                       sectorDrawFloor)
+                                            return (l,t,distribute v)
+                                       Omni ->
+                                         let v =
+                                               mkTransformation 0
+                                                                (negate (lightPos l))
+                                         in return (l,t,distribute v))
                glBindFramebuffer GL_FRAMEBUFFER 0
                -- glEnable GL_CULL_FACE
                -- glCullFace GL_BACK
@@ -337,34 +347,34 @@ hadoom sectors win =
                glDepthFunc GL_EQUAL
                glDepthMask GL_FALSE
                glUseProgram shaderProg
-               flip V.mapM_ lights' $
-                 \(l,t,v) ->
-                   do with v $
-                        \ptr ->
-                          do glUseProgram shaderProg
-                             loc <- withCString "camV"
-                                                (glGetUniformLocation shaderProg)
-                             glUniformMatrix4fv loc
-                                                1
-                                                0
-                                                (castPtr (ptr :: Ptr (M44 CFloat)))
-                      let i =
-                            case lightShape l of
-                              Omni -> pointIndex
-                              Spotlight{} -> spotlightIndex
-                      with i $
-                        glUniformSubroutinesuiv GL_FRAGMENT_SHADER 1
-                      glActiveTexture GL_TEXTURE1
-                      glBindTexture GL_TEXTURE_2D t
-                      with l $
-                        \ptr ->
-                          do glBindBuffer GL_UNIFORM_BUFFER lightsUBO
-                             glBufferData GL_UNIFORM_BUFFER
-                                          (fromIntegral (sizeOf (undefined :: Light)))
-                                          (castPtr ptr)
-                                          GL_STREAM_DRAW
-                      -- GL.polygonMode $= (GL.Line, GL.Line)
-                      mapM_ drawSectorTextured sectors
+               flip V.mapM_
+                    lights'
+                    (\(l,t,v) ->
+                       do with v
+                               (\ptr ->
+                                  do glUseProgram shaderProg
+                                     loc <- withCString "camV"
+                                                        (glGetUniformLocation shaderProg)
+                                     glUniformMatrix4fv loc
+                                                        1
+                                                        0
+                                                        (castPtr (ptr :: Ptr (M44 CFloat))))
+                          let i =
+                                case lightShape l of
+                                  Omni -> pointIndex
+                                  Spotlight{} -> spotlightIndex
+                          with i (glUniformSubroutinesuiv GL_FRAGMENT_SHADER 1)
+                          glActiveTexture GL_TEXTURE1
+                          glBindTexture GL_TEXTURE_2D t
+                          with l
+                               (\ptr ->
+                                  do glBindBuffer GL_UNIFORM_BUFFER lightsUBO
+                                     glBufferData GL_UNIFORM_BUFFER
+                                                  (fromIntegral (sizeOf (undefined :: Light)))
+                                                  (castPtr ptr)
+                                                  GL_STREAM_DRAW)
+                          -- GL.polygonMode $= (GL.Line, GL.Line)
+                          mapM_ drawSectorTextured sectors)
                SDL.glSwapWindow win
                again (w',newTime))
          (scene,tstart)

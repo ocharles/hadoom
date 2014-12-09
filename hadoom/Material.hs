@@ -1,14 +1,12 @@
 {-# LANGUAGE RecordWildCards #-}
 module Material where
 
-import Prelude hiding (any, floor, ceiling, (.), id)
-
 import Control.Monad (when)
 import Foreign.Ptr
 import Graphics.GL
 import Graphics.GL.Ext.EXT.TextureFilterAnisotropic
+import Prelude hiding (any, floor, ceiling, (.), id)
 import Util
-
 import qualified Codec.Picture as JP
 import qualified Codec.Picture.Types as JP
 import qualified Data.Vector.Storable as SV
@@ -35,54 +33,57 @@ loadTexture path colorSpace =
             glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MAG_FILTER GL_LINEAR
             case dimg of
               JP.ImageRGB8 (JP.Image w h d) ->
-                SV.unsafeWith d $
-                \ptr ->
-                  glTexImage2D
-                    GL_TEXTURE_2D
-                    0
-                    (case colorSpace of
-                       SRGB -> GL_SRGB
-                       Linear -> GL_RGB32F)
-                    (fromIntegral w)
-                    (fromIntegral h)
-                    0
-                    GL_RGB
-                    GL_UNSIGNED_BYTE
-                    (castPtr ptr)
+                SV.unsafeWith
+                  d
+                  (\ptr ->
+                     glTexImage2D
+                       GL_TEXTURE_2D
+                       0
+                       (case colorSpace of
+                          SRGB -> GL_SRGB
+                          Linear -> GL_RGB32F)
+                       (fromIntegral w)
+                       (fromIntegral h)
+                       0
+                       GL_RGB
+                       GL_UNSIGNED_BYTE
+                       (castPtr ptr))
               JP.ImageRGBA8 (JP.Image w h d) ->
-                SV.unsafeWith d $
-                \ptr ->
-                  glTexImage2D
-                    GL_TEXTURE_2D
-                    0
-                    (case colorSpace of
-                       SRGB -> GL_SRGB
-                       Linear -> GL_RGB32F)
-                    (fromIntegral w)
-                    (fromIntegral h)
-                    0
-                    GL_RGBA
-                    GL_UNSIGNED_BYTE
-                    (castPtr ptr)
+                SV.unsafeWith
+                  d
+                  (\ptr ->
+                     glTexImage2D
+                       GL_TEXTURE_2D
+                       0
+                       (case colorSpace of
+                          SRGB -> GL_SRGB
+                          Linear -> GL_RGB32F)
+                       (fromIntegral w)
+                       (fromIntegral h)
+                       0
+                       GL_RGBA
+                       GL_UNSIGNED_BYTE
+                       (castPtr ptr))
               JP.ImageYCbCr8 img ->
                 let toRgb8 =
                       JP.convertPixel :: JP.PixelYCbCr8 -> JP.PixelRGB8
                 in case JP.pixelMap toRgb8 img of
                      JP.Image w h d ->
-                       do SV.unsafeWith d $
-                            \ptr ->
-                              glTexImage2D
-                                GL_TEXTURE_2D
-                                0
-                                (case colorSpace of
-                                   SRGB -> GL_SRGB
-                                   Linear -> GL_RGB32F)
-                                (fromIntegral w)
-                                (fromIntegral h)
-                                0
-                                GL_RGB
-                                GL_UNSIGNED_BYTE
-                                (castPtr ptr)
+                       do SV.unsafeWith
+                            d
+                            (\ptr ->
+                               glTexImage2D
+                                 GL_TEXTURE_2D
+                                 0
+                                 (case colorSpace of
+                                    SRGB -> GL_SRGB
+                                    Linear -> GL_RGB32F)
+                                 (fromIntegral w)
+                                 (fromIntegral h)
+                                 0
+                                 GL_RGB
+                                 GL_UNSIGNED_BYTE
+                                 (castPtr ptr))
               _ -> error "Unknown image format"
             glGenerateMipmap GL_TEXTURE_2D
             when gl_EXT_texture_filter_anisotropic

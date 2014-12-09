@@ -3,8 +3,6 @@
 {-# LANGUAGE RecordWildCards #-}
 module Sector where
 
-import Prelude hiding (any, floor, ceiling, (.), id)
-
 import Control.Applicative
 import Control.Category
 import Control.Lens hiding (indices)
@@ -15,17 +13,16 @@ import Data.Monoid ((<>))
 import Data.Ord (comparing)
 import Foreign (Storable(..), castPtr, nullPtr, plusPtr)
 import Foreign.C (CFloat)
+import Geometry
 import Graphics.GL
 import Linear as L hiding (outer)
+import Material
+import Prelude hiding (any, floor, ceiling, (.), id)
+import Shader
 import Util
-
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Vector as V
 import qualified Data.Vector.Storable as SV
-
-import Geometry
-import Material
-import Shader
 
 data Vertex =
   Vertex {vPos :: {-# UNPACK #-} !(V3 CFloat)
@@ -84,8 +81,7 @@ data Sector =
          ,sectorCeilingMaterial :: Material
          ,sectorWallMaterial :: Material}
 
-rayLineIntersection :: (Epsilon a,Fractional a,Ord a)
-                    => V2 a -> V2 a -> V2 a -> V2 a -> Maybe (V2 a)
+rayLineIntersection :: (Epsilon a,Fractional a,Ord a) => V2 a -> V2 a -> V2 a -> V2 a -> Maybe (V2 a)
 rayLineIntersection p r q q' =
   let s = q' - q
       cross2 (V2 a b) (V2 x y) = a * y - b * x
@@ -102,8 +98,7 @@ rayLineIntersection p r q q' =
                  then Just (p + r ^* t)
                  else Nothing
 
-makeSimple :: (Epsilon a,Fractional a,Ord a)
-           => V.Vector (V2 a) -> V.Vector (V2 a) -> V.Vector (V2 a)
+makeSimple :: (Epsilon a,Fractional a,Ord a) => V.Vector (V2 a) -> V.Vector (V2 a) -> V.Vector (V2 a)
 makeSimple inner outer =
   let xMost = comparing (view _x)
       m = V.maximumBy xMost inner
@@ -168,8 +163,7 @@ makeSimple inner outer =
                  inner) <>
          after
 
-triangulate :: (Epsilon a,Fractional a,Ord a)
-            => V.Vector (V2 a) -> V.Vector Int
+triangulate :: (Epsilon a,Fractional a,Ord a) => V.Vector (V2 a) -> V.Vector Int
 triangulate = collapseAndTriangulate
   where collapseAndTriangulate vs =
           collapse vs (go (addIndices vs))
@@ -179,8 +173,7 @@ takeFirst f =
   V.take 1 .
   V.filter f
 
-isEar :: (Epsilon a,Ord a,Fractional a)
-      => ((t,V2 a),(t1,V2 a),(t2,V2 a),V.Vector (t3,V2 a)) -> Bool
+isEar :: (Epsilon a,Ord a,Fractional a) => ((t,V2 a),(t1,V2 a),(t2,V2 a),V.Vector (t3,V2 a)) -> Bool
 isEar ((_,a),(_,b),(_,c),otherVertices) =
   let area = triangleArea a b c
       containsOther =
@@ -193,8 +186,7 @@ isEar ((_,a),(_,b),(_,c),otherVertices) =
                       otherVertices)
   in area > 0 && not containsOther
 
-go :: (Epsilon b,Ord b,Fractional b)
-   => V.Vector (a,V2 b) -> V.Vector a
+go :: (Epsilon b,Ord b,Fractional b) => V.Vector (a,V2 b) -> V.Vector a
 go s
   | V.length s < 3 = empty
   | otherwise =
@@ -203,8 +195,7 @@ go s
          go (v0 `V.cons`
              (v2 `V.cons` others))
 
-go1 :: (Ord a1,Epsilon a1,Fractional a1)
-    => V.Vector (a,V2 a1) -> (V.Vector a,V.Vector (a,V2 a1))
+go1 :: (Ord a1,Epsilon a1,Fractional a1) => V.Vector (a,V2 a1) -> (V.Vector a,V.Vector (a,V2 a1))
 go1 s
   | V.length s < 3 = error "Done"
   | otherwise =
@@ -225,13 +216,11 @@ separate vertices =
             (V.drop 1 doubleVerts)
             (V.drop 2 doubleVerts)
             (V.imap (\i _ ->
-                       V.take (n - 3) $
-                       V.drop (i + 3) $
-                       doubleVerts)
+                       V.take (n - 3)
+                              (V.drop (i + 3) doubleVerts))
                     vertices)
 
-collapse :: Epsilon a
-         => V.Vector a -> V.Vector Int -> V.Vector Int
+collapse :: Epsilon a => V.Vector a -> V.Vector Int -> V.Vector Int
 collapse vs =
   V.map (\i ->
            let v = vs V.! i
@@ -281,22 +270,21 @@ buildSector Blueprint{..} =
           do vbo <- overPtr (glGenBuffers 1)
              glBindBuffer GL_ARRAY_BUFFER vbo
              let vertices = wallVertices <> floorVertices <> ceilingVertices
-             SV.unsafeWith (V.convert vertices) $
-               \verticesPtr ->
-                 glBufferData
-                   GL_ARRAY_BUFFER
-                   (fromIntegral
-                      (V.length vertices *
-                       sizeOf (undefined :: Vertex)))
-                   (castPtr verticesPtr)
-                   GL_STATIC_DRAW
+             SV.unsafeWith
+               (V.convert vertices)
+               (\verticesPtr ->
+                  glBufferData
+                    GL_ARRAY_BUFFER
+                    (fromIntegral
+                       (V.length vertices *
+                        sizeOf (undefined :: Vertex)))
+                    (castPtr verticesPtr)
+                    GL_STATIC_DRAW)
         configureVertexAttributes =
           do let stride =
-                   fromIntegral $
-                   sizeOf (undefined :: Vertex)
+                   fromIntegral (sizeOf (undefined :: Vertex))
                  normalOffset =
-                   fromIntegral $
-                   sizeOf (0 :: V3 CFloat)
+                   fromIntegral (sizeOf (0 :: V3 CFloat))
                  tangentOffset =
                    normalOffset +
                    fromIntegral (sizeOf (0 :: V3 CFloat))
@@ -346,35 +334,33 @@ buildSector Blueprint{..} =
                   let wallV = end ^-^ start
                       wallLen = norm wallV
                       n =
-                        normalize $
-                        case perp wallV of
-                          V2 x y -> V3 x 0 y
+                        normalize (case perp wallV of
+                                     V2 x y ->
+                                       V3 x 0 y)
                       u = wallLen / 25
                       v =
                         (blueprintCeiling - blueprintFloor) /
                         25
-                  in V.fromList $
-                     getZipList $
-                     Vertex <$>
-                     ZipList [V3 x1 blueprintFloor y1
-                             ,V3 x1 blueprintCeiling y1
-                             ,V3 x2 blueprintFloor y2
-                             ,V3 x2 blueprintCeiling y2] <*>
-                     ZipList (repeat n) <*>
-                     ZipList (repeat $
-                              normalize $
-                              case end - start of
-                                V2 x y ->
-                                  V3 x 0 y) <*>
-                     ZipList (repeat $
-                              V3 0 1 0) <*>
-                     ZipList [V2 0 v,V2 0 0,V2 u v,V2 u 0]
+                  in V.fromList
+                       (getZipList
+                          (Vertex <$>
+                           ZipList [V3 x1 blueprintFloor y1
+                                   ,V3 x1 blueprintCeiling y1
+                                   ,V3 x2 blueprintFloor y2
+                                   ,V3 x2 blueprintCeiling y2] <*>
+                           ZipList (repeat n) <*>
+                           ZipList (repeat (normalize (case end - start of
+                                                         V2 x y ->
+                                                           V3 x 0 y))) <*>
+                           ZipList (repeat (V3 0 1 0)) <*>
+                           ZipList [V2 0 v,V2 0 0,V2 u v,V2 u 0]))
         wallIndices =
-          V.concatMap id $
-          V.imap (\m _ ->
-                    let n = m * 4
-                    in V.map fromIntegral [n,n + 2,n + 1,n + 1,n + 2,n + 3])
-                 blueprintWalls
+          V.concatMap
+            id
+            (V.imap (\m _ ->
+                       let n = m * 4
+                       in V.map fromIntegral [n,n + 2,n + 1,n + 1,n + 2,n + 3])
+                    blueprintWalls)
         floorVertices =
           V.map (\(V2 x y) ->
                    Vertex (V3 x blueprintFloor y)
@@ -395,8 +381,8 @@ buildSector Blueprint{..} =
         floorIndices =
           let n =
                 fromIntegral (V.length wallVertices)
-          in fmap (fromIntegral . (+ n)) $
-             triangulate (V.fromList (IM.elems blueprintVertices))
+          in fmap (fromIntegral . (+ n))
+                  (triangulate (V.fromList (IM.elems blueprintVertices)))
         ceilingIndices =
           let reverseTriangles v =
                 case V.splitAt 3 v of
@@ -412,15 +398,16 @@ buildSector Blueprint{..} =
                  indices = wallIndices <> floorIndices <> ceilingIndices
              ibo <- overPtr (glGenBuffers 1)
              glBindBuffer GL_ELEMENT_ARRAY_BUFFER ibo
-             SV.unsafeWith (V.convert indices) $
-               \indicesPtr ->
-                 glBufferData
-                   GL_ELEMENT_ARRAY_BUFFER
-                   (fromIntegral
-                      (V.length indices *
-                       sizeOf (0 :: Int32)))
-                   (castPtr indicesPtr)
-                   GL_STATIC_DRAW
+             SV.unsafeWith
+               (V.convert indices)
+               (\indicesPtr ->
+                  glBufferData
+                    GL_ELEMENT_ARRAY_BUFFER
+                    (fromIntegral
+                       (V.length indices *
+                        sizeOf (0 :: Int32)))
+                    (castPtr indicesPtr)
+                    GL_STATIC_DRAW)
 
 drawSectorTextured :: Sector -> IO ()
 drawSectorTextured Sector{..} =
