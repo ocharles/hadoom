@@ -60,7 +60,7 @@ instance Storable Light where
             y
 
 shadowMapResolution :: GLsizei
-shadowMapResolution = 1024
+shadowMapResolution = 2048
 
 genLightDepthMap :: IO GLTextureObject
 genLightDepthMap =
