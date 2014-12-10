@@ -305,8 +305,8 @@ hadoom sectors win =
                                                                 (negate (lightPos l))
                                          in return (l,t,distribute v))
                glBindFramebuffer GL_FRAMEBUFFER 0
-               -- glEnable GL_CULL_FACE
-               -- glCullFace GL_BACK
+               glEnable GL_CULL_FACE
+               glCullFace GL_BACK
                glViewport 0 0 screenWidth screenHeight
                glClear GL_DEPTH_BUFFER_BIT
                glUseProgram shaderProg
