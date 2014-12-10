@@ -4,8 +4,6 @@
 {-# LANGUAGE OverloadedLists #-}
 module Physics where
 
-import Prelude hiding (any, floor, ceiling, (.), id)
-
 import Camera
 import Control.Applicative
 import Control.Arrow
@@ -15,7 +13,7 @@ import Control.Monad.Fix (MonadFix)
 import Foreign.C (CFloat)
 import Light
 import Linear as L
-
+import Prelude hiding (any, floor, ceiling, (.), id)
 import qualified Data.Vector as V
 import qualified FRP
 import qualified SDL
@@ -45,15 +43,15 @@ scene =
                        (fromQuaternion
                           (axisAngle (V3 0 1 0)
                                      (realToFrac (pi / 4)))))
-     -- ,Light (V3 0 2 0)
-     --        (V3 1 1 1)
-     --        350
-     --        (Spotlight (lightDir (realToFrac (-t)))
-     --                   0.8
-     --                   0.1
-     --                   (fromQuaternion
-     --                      (axisAngle (V3 0 1 0)
-     --                                 (realToFrac (-t)))))
+     ,Light (V3 0 2 0)
+            (V3 1 1 1)
+            350
+            (Spotlight (lightDir (realToFrac (-t)))
+                       0.8
+                       0.1
+                       (fromQuaternion
+                          (axisAngle (V3 0 1 0)
+                                     (realToFrac (-t)))))
      ,Light (V3 0 2 3) 1 3 Omni
      ,Light (V3 (-3) 2 0) 1 3 Omni
      ,Light (V3 3 2 0) 1 3 Omni
@@ -69,18 +67,29 @@ worldCamera =
   proc events ->
   do goForward <- keyHeld SDL.ScancodeW -< events
      goBackward <- keyHeld SDL.ScancodeS -< events
+     strafeLeft <- keyHeld SDL.ScancodeA -< events
+     strafeRight <- keyHeld SDL.ScancodeD -< events
      c <- camera -< events
-     rec forward <- if goForward then
-                       FRP.integral -< cameraForward c * 10 else
-                       returnA -< forward'
+     let forwardV = cameraForward c
+         speed = 5
+         strafeSpeed = 3
+     rec forward <- if goForward then FRP.integral -< forwardV * speed else
+                      returnA -< forward'
          forward' <- FRP.delay 0 -< forward
-
          backward <- if goBackward then
-                       FRP.integral -< negate (cameraForward c * 10) else
-                       returnA -< backward'
+                       FRP.integral -< negate forwardV * speed else returnA -< backward'
          backward' <- FRP.delay 0 -< backward
+         let strafeV
+               = fromQuaternion (axisAngle (V3 0 1 0) (pi / 2)) !* forwardV
+         strafeL <- if strafeLeft then FRP.integral -< strafeV * strafeSpeed else
+                      returnA -< strafeL'
+         strafeL' <- FRP.delay 0 -< strafeL
+         strafeR <- if strafeRight then FRP.integral -< negate strafeV * strafeSpeed else
+                      returnA -< strafeR'
+         strafeR' <- FRP.delay 0 -< strafeR
      returnA -<
-       m33_to_m44 (fromQuaternion (cameraQuat c)) & translation .~ (forward + backward + V3 0 1.75 0)
+       m33_to_m44 (fromQuaternion (cameraQuat c)) & translation .~
+         (forward + backward + strafeL + strafeR + V3 0 1.75 0)
 
 keyPressed :: (Applicative m,MonadFix m)
            => SDL.Scancode -> FRP.Wire m [SDL.Event] Bool
