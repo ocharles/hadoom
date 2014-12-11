@@ -72,94 +72,95 @@ room =
 --------------------------------------------------------------------------------
 data RenderData =
   RenderData {_shadowShader :: GLProgram
+             ,_sceneShader :: GLProgram
              ,_lightFBO :: GLuint
+             ,_lightsUBO :: GLuint
              ,_sectors :: [Sector]
-             ,_lightTextures :: V.Vector GLTextureObject}
+             ,_lightTextures :: V.Vector GLTextureObject
+             ,_spotlightIndex :: GLuint
+             ,_pointIndex :: GLuint}
 
 makeClassy ''RenderData
 
 --------------------------------------------------------------------------------
 hadoom :: [Sector] -> SDL.Window -> IO b
 hadoom sectors win =
-  do shaderProg <- createShaderProgram "shaders/vertex/projection-model.glsl"
-                                       "shaders/fragment/solid-white.glsl"
-     spotlightIndex <- withCString
-                         "spotlight"
-                         (glGetSubroutineIndex (unGLProgram shaderProg)
-                                               GL_FRAGMENT_SHADER)
-     pointIndex <- withCString
-                     "omni"
-                     (glGetSubroutineIndex (unGLProgram shaderProg)
-                                           GL_FRAGMENT_SHADER)
-     shadowShader <- createShaderProgram "shaders/vertex/shadow.glsl" "shaders/fragment/depth.glsl"
-     let perspectiveMat :: M44 GLfloat
-         perspectiveMat =
-           perspective (pi / 180 * 40)
-                       (800 / 600)
-                       1
-                       100
-         lPerspective :: M44 GLfloat
-         lPerspective =
-           perspective 2.27
-                       (4 / 3)
-                       1
-                       100
-     setUniform shaderProg "projection" perspectiveMat
-     setUniform shaderProg "lightProjection" lPerspective
-     setUniform shadowShader "depthP" lPerspective
-     let bias =
-           V4 (V4 0.5 0 0 0)
-              (V4 0 0.5 0 0)
-              (V4 0 0 0.5 0)
-              (V4 0.5 0.5 0.5 1)
-     setUniform shaderProg
-                "bias"
-                (bias :: M44 CFloat)
-     setUniform shaderProg
-                "tex"
-                (0 :: Int32)
-     setUniform shaderProg
-                "depthMap"
-                (1 :: Int32)
-     setUniform shaderProg
-                "nmap"
-                (2 :: Int32)
-     let shaderId = unGLProgram shaderProg
-     blockIndex <- withCString "Light"
-                               (glGetUniformBlockIndex shaderId)
-     lightsUBO <- overPtr (glGenBuffers 1)
-     glBindBuffer GL_UNIFORM_BUFFER lightsUBO
-     glBindBufferBase GL_UNIFORM_BUFFER blockIndex lightsUBO
-     tstart <- getCurrentTime
-     lightFBO <- unGLFramebufferObject <$> genLightFramebufferObject
-     lightTextures <- V.replicateM 10 genLightDepthMap
-     let rd =
-           RenderData {_shadowShader = shadowShader
-                      ,_lightFBO = lightFBO
-                      ,_sectors = sectors
-                      ,_lightTextures = lightTextures}
-     runReaderT
-       (fix (\again (w,currentTime) ->
-               do newTime <- liftIO getCurrentTime
-                  let frameTime = newTime `diffUTCTime` currentTime
-                  events <- liftIO (unfoldM SDL.pollEvent)
-                  let (Scene viewMat lights,w') =
-                        runIdentity
-                          (FRP.stepWire w
-                                        (realToFrac frameTime)
-                                        events)
-                  setUniform
-                    shaderProg
-                    "view"
-                    (distribute
-                       (fromMaybe (error "Failed to invert view matrix")
-                                  (inv44 viewMat)))
-                  lights' <- renderLightDepthTextures lights
-                  renderFromCamera shaderProg lights' pointIndex spotlightIndex lightsUBO
-                  SDL.glSwapWindow win
-                  again (w',newTime))
-            (scene,tstart))
-       rd
+  do tstart <- getCurrentTime
+     joinMap (runReaderT (fix step (scene,tstart))) loadRenderData
+  where step again (w,currentTime) =
+          do newTime <- liftIO getCurrentTime
+             let frameTime = newTime `diffUTCTime` currentTime
+             events <- liftIO (unfoldM SDL.pollEvent)
+             let (Scene viewMat lights,w') =
+                   runIdentity
+                     (FRP.stepWire w
+                                   (realToFrac frameTime)
+                                   events)
+             do s <- view sceneShader
+                setUniform
+                  s
+                  "view"
+                  (distribute
+                     (fromMaybe (error "Failed to invert view matrix")
+                                (inv44 viewMat)))
+             lights' <- renderLightDepthTextures lights
+             renderFromCamera lights'
+             SDL.glSwapWindow win
+             again (w',newTime)
+        loadRenderData =
+          do shaderProg <- createShaderProgram "shaders/vertex/projection-model.glsl"
+                                               "shaders/fragment/solid-white.glsl"
+             spotlightIndex <- getSubroutineIndex shaderProg "spotlight"
+             pointIndex <- getSubroutineIndex shaderProg "omni"
+             shadowShader <- createShaderProgram "shaders/vertex/shadow.glsl"
+                                                 "shaders/fragment/depth.glsl"
+             let perspectiveMat :: M44 GLfloat
+                 perspectiveMat =
+                   perspective (pi / 180 * 40)
+                               (800 / 600)
+                               1
+                               100
+                 lPerspective :: M44 GLfloat
+                 lPerspective =
+                   perspective 2.27
+                               (4 / 3)
+                               1
+                               100
+             setUniform shaderProg "projection" perspectiveMat
+             setUniform shaderProg "lightProjection" lPerspective
+             setUniform shadowShader "depthP" lPerspective
+             let bias =
+                   V4 (V4 0.5 0 0 0)
+                      (V4 0 0.5 0 0)
+                      (V4 0 0 0.5 0)
+                      (V4 0.5 0.5 0.5 1)
+             setUniform shaderProg
+                        "bias"
+                        (bias :: M44 CFloat)
+             setUniform shaderProg
+                        "tex"
+                        (0 :: Int32)
+             setUniform shaderProg
+                        "depthMap"
+                        (1 :: Int32)
+             setUniform shaderProg
+                        "nmap"
+                        (2 :: Int32)
+             lightFBO <- unGLFramebufferObject <$> genLightFramebufferObject
+             lightTextures <- V.replicateM 10 genLightDepthMap
+             lightsUBO <- overPtr (glGenBuffers 1)
+             glBindBuffer GL_UNIFORM_BUFFER lightsUBO
+             blockIndex <- getUniformBlockIndex shaderProg "Light"
+             glBindBufferBase GL_UNIFORM_BUFFER blockIndex lightsUBO
+             return RenderData {_shadowShader = shadowShader
+                               ,_lightFBO = lightFBO
+                               ,_sectors = sectors
+                               ,_lightTextures = lightTextures
+                               ,_sceneShader = shaderProg
+                               ,_pointIndex = pointIndex
+                               ,_spotlightIndex = spotlightIndex
+                               ,_lightsUBO = lightsUBO
+                               }
 
 --------------------------------------------------------------------------------
 renderLightDepthTextures :: (Applicative m, MonadIO m, MonadReader r m, HasRenderData r)
@@ -212,18 +213,14 @@ renderLightDepthTexture l t =
 
 --------------------------------------------------------------------------------
 renderFromCamera :: (MonadIO m, MonadReader r m, HasRenderData r)
-                 => GLProgram
-                 -> V.Vector (Light,GLuint,M44 CFloat)
-                 -> GLuint
-                 -> GLuint
-                 -> GLuint
+                 => V.Vector (Light,GLuint,M44 CFloat)
                  -> m ()
-renderFromCamera shaderProg lights pointIndex spotlightIndex lightsUBO =
+renderFromCamera lights =
   do activateDefaultFramebuffer
      enableBackfaceCulling
      renderDepthBuffer
      prepareMultipassRendering
-     glUseProgram (unGLProgram shaderProg)
+     glUseProgram . unGLProgram =<< view sceneShader
      V.mapM_ (\(l,t,v) -> renderPass l t v) lights
   where activateDefaultFramebuffer =
           do glBindFramebuffer GL_FRAMEBUFFER 0
@@ -233,7 +230,7 @@ renderFromCamera shaderProg lights pointIndex spotlightIndex lightsUBO =
              glCullFace GL_BACK
         renderDepthBuffer =
           do glClear GL_DEPTH_BUFFER_BIT
-             glUseProgram (unGLProgram shaderProg)
+             glUseProgram . unGLProgram =<< view sceneShader
              liftIO . mapM_ drawSectorTextured =<< view sectors
         prepareMultipassRendering =
           do glEnable GL_BLEND
@@ -242,18 +239,19 @@ renderFromCamera shaderProg lights pointIndex spotlightIndex lightsUBO =
              glDepthFunc GL_EQUAL
              glDepthMask GL_FALSE
         renderPass l t v =
-          do setUniform shaderProg "camV" v
-             let i =
-                   case lightShape l of
-                     Omni -> pointIndex
-                     Spotlight{} -> spotlightIndex
+          do do s <- view sceneShader
+                setUniform s "camV" v
+             i <- view (case lightShape l of
+                          Omni -> pointIndex
+                          Spotlight{} -> spotlightIndex)
              liftIO (with i (glUniformSubroutinesuiv GL_FRAGMENT_SHADER 1))
              glActiveTexture GL_TEXTURE1
              glBindTexture GL_TEXTURE_2D t
+             glBindBuffer GL_UNIFORM_BUFFER =<<
+               view lightsUBO
              liftIO (with l
                           (\ptr ->
-                             do glBindBuffer GL_UNIFORM_BUFFER lightsUBO
-                                glBufferData GL_UNIFORM_BUFFER
+                             do glBufferData GL_UNIFORM_BUFFER
                                              (fromIntegral (sizeOf (undefined :: Light)))
                                              (castPtr ptr)
                                              GL_STREAM_DRAW))
@@ -280,6 +278,7 @@ withHadoom m =
      SDL.setRelativeMouseMode True
      m win `finally` SDL.destroyRenderer renderer
 
+--------------------------------------------------------------------------------
 testHadoom :: [(Double,Double)] -> FilePath -> IO ()
 testHadoom vertices wallTexture =
   withHadoom
@@ -310,6 +309,7 @@ testHadoom vertices wallTexture =
                                 ,blueprintWallMaterial = test}
           hadoom [sector] w)
 
+--------------------------------------------------------------------------------
 playHadoom :: IO ()
 playHadoom =
   withHadoom
@@ -362,5 +362,6 @@ playHadoom =
                                                                                ,blueprintWallMaterial = wall1})
           hadoom [sectorLargeRoom,sectorCol1,sectorCol2,sectorCol3,sectorCol4] w)
 
+--------------------------------------------------------------------------------
 joinMap :: Monad m => (a -> m b) -> m a -> m b
 joinMap = (=<<)

@@ -84,3 +84,13 @@ instance Storable a => Uniform (M44 a) where
 
 instance Uniform Int32 where
   setUniformLoc = glUniform1i
+
+getSubroutineIndex :: MonadIO m => GLProgram -> String -> m GLuint
+getSubroutineIndex (GLProgram p) subroutine =
+  liftIO (withCString subroutine
+                      (glGetSubroutineIndex p GL_FRAGMENT_SHADER))
+
+getUniformBlockIndex :: MonadIO m => GLProgram -> String -> m GLuint
+getUniformBlockIndex (GLProgram p) block =
+  liftIO (withCString block
+                      (glGetUniformBlockIndex p))
