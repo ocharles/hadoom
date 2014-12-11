@@ -71,7 +71,7 @@ room =
 
 --------------------------------------------------------------------------------
 data RenderData =
-  RenderData {_shadowShader :: GLuint
+  RenderData {_shadowShader :: GLProgram
              ,_lightFBO :: GLuint
              ,_sectors :: [Sector]
              ,_lightTextures :: V.Vector GLTextureObject}
@@ -81,15 +81,17 @@ makeClassy ''RenderData
 --------------------------------------------------------------------------------
 hadoom :: [Sector] -> SDL.Window -> IO b
 hadoom sectors win =
-  do shaderProg <- unGLProgram <$>
-                   createShaderProgram "shaders/vertex/projection-model.glsl"
+  do shaderProg <- createShaderProgram "shaders/vertex/projection-model.glsl"
                                        "shaders/fragment/solid-white.glsl"
-     spotlightIndex <- withCString "spotlight"
-                                   (glGetSubroutineIndex shaderProg GL_FRAGMENT_SHADER)
-     pointIndex <- withCString "omni"
-                               (glGetSubroutineIndex shaderProg GL_FRAGMENT_SHADER)
-     shadowShader <- unGLProgram <$>
-                     createShaderProgram "shaders/vertex/shadow.glsl" "shaders/fragment/depth.glsl"
+     spotlightIndex <- withCString
+                         "spotlight"
+                         (glGetSubroutineIndex (unGLProgram shaderProg)
+                                               GL_FRAGMENT_SHADER)
+     pointIndex <- withCString
+                     "omni"
+                     (glGetSubroutineIndex (unGLProgram shaderProg)
+                                           GL_FRAGMENT_SHADER)
+     shadowShader <- createShaderProgram "shaders/vertex/shadow.glsl" "shaders/fragment/depth.glsl"
      let perspectiveMat :: M44 GLfloat
          perspectiveMat =
            perspective (pi / 180 * 40)
@@ -102,50 +104,27 @@ hadoom sectors win =
                        (4 / 3)
                        1
                        100
-     with perspectiveMat
-          (\ptr ->
-             do loc1 <- withCString "projection"
-                                    (glGetUniformLocation shaderProg)
-                glUseProgram shaderProg
-                glUniformMatrix4fv loc1
-                                   1
-                                   0
-                                   (castPtr ptr))
-     with lPerspective
-          (\ptr ->
-             do loc <- withCString "lightProjection"
-                                   (glGetUniformLocation shaderProg)
-                glUseProgram shaderProg
-                glUniformMatrix4fv loc
-                                   1
-                                   0
-                                   (castPtr ptr)
-                loc1 <- withCString "depthP"
-                                    (glGetUniformLocation shadowShader)
-                glUseProgram shadowShader
-                glUniformMatrix4fv loc1
-                                   1
-                                   0
-                                   (castPtr ptr))
+     setUniform shaderProg "projection" perspectiveMat
+     setUniform shaderProg "lightProjection" lPerspective
+     setUniform shadowShader "depthP" lPerspective
      let bias =
-           [0.5,0,0,0,0,0.5,0,0,0,0,0.5,0,0.5,0.5,0.5,1]
-     SV.unsafeWith
-       bias
-       (\ptr ->
-          do loc1 <- withCString "bias"
-                                 (glGetUniformLocation shaderProg)
-             glUseProgram shaderProg
-             glUniformMatrix4fv loc1 1 0 ptr)
-     do loc <- withCString "tex"
-                           (glGetUniformLocation shaderProg)
-        glUniform1i loc 0
-     do loc <- withCString "depthMap"
-                           (glGetUniformLocation shaderProg)
-        glUniform1i loc 1
-     do loc <- withCString "nmap"
-                           (glGetUniformLocation shaderProg)
-        glUniform1i loc 2
-     shaderId <- unsafeCoerce shaderProg
+           V4 (V4 0.5 0 0 0)
+              (V4 0 0.5 0 0)
+              (V4 0 0 0.5 0)
+              (V4 0.5 0.5 0.5 1)
+     setUniform shaderProg
+                "bias"
+                (bias :: M44 CFloat)
+     setUniform shaderProg
+                "tex"
+                (0 :: Int32)
+     setUniform shaderProg
+                "depthMap"
+                (1 :: Int32)
+     setUniform shaderProg
+                "nmap"
+                (2 :: Int32)
+     let shaderId = unGLProgram shaderProg
      blockIndex <- withCString "Light"
                                (glGetUniformBlockIndex shaderId)
      lightsUBO <- overPtr (glGenBuffers 1)
@@ -169,17 +148,12 @@ hadoom sectors win =
                           (FRP.stepWire w
                                         (realToFrac frameTime)
                                         events)
-                  liftIO (with (distribute
-                                  (fromMaybe (error "Failed to invert view matrix")
-                                             (inv44 viewMat)))
-                               (\ptr ->
-                                  do loc1 <- withCString "view"
-                                                         (glGetUniformLocation shaderProg)
-                                     glUseProgram shaderProg
-                                     glUniformMatrix4fv loc1
-                                                        1
-                                                        0
-                                                        (castPtr (ptr :: Ptr (M44 CFloat)))))
+                  setUniform
+                    shaderProg
+                    "view"
+                    (distribute
+                       (fromMaybe (error "Failed to invert view matrix")
+                                  (inv44 viewMat)))
                   lights' <- renderLightDepthTextures lights
                   renderFromCamera shaderProg lights' pointIndex spotlightIndex lightsUBO
                   SDL.glSwapWindow win
@@ -195,7 +169,7 @@ renderLightDepthTextures lights =
   do glDisable GL_BLEND
      glDepthMask GL_TRUE
      glDepthFunc GL_LEQUAL
-     glUseProgram =<< view shadowShader
+     glUseProgram . unGLProgram =<< view shadowShader
      glBindFramebuffer GL_DRAW_FRAMEBUFFER =<<
        view lightFBO
      glViewport 0 0 shadowMapResolution shadowMapResolution
@@ -222,15 +196,8 @@ renderLightDepthTexture l t =
                   m33_to_m44 rotationMatrix !*!
                   mkTransformation 0
                                    (negate (lightPos l))
-            shadowShaderId <- view shadowShader
-            liftIO (with (distribute v)
-                         (\ptr ->
-                            do loc <- withCString "depthV"
-                                                  (glGetUniformLocation shadowShaderId)
-                               glUniformMatrix4fv loc
-                                                  1
-                                                  0
-                                                  (castPtr (ptr :: Ptr (M44 CFloat)))))
+            shader <- view shadowShader
+            setUniform shader "depthV" (distribute v)
             joinMap (traverse_ (\Sector{..} ->
                                   liftIO (do sectorDrawWalls
                                              sectorDrawFloor
@@ -245,7 +212,7 @@ renderLightDepthTexture l t =
 
 --------------------------------------------------------------------------------
 renderFromCamera :: (MonadIO m, MonadReader r m, HasRenderData r)
-                 => GLuint
+                 => GLProgram
                  -> V.Vector (Light,GLuint,M44 CFloat)
                  -> GLuint
                  -> GLuint
@@ -256,7 +223,7 @@ renderFromCamera shaderProg lights pointIndex spotlightIndex lightsUBO =
      enableBackfaceCulling
      renderDepthBuffer
      prepareMultipassRendering
-     glUseProgram shaderProg
+     glUseProgram (unGLProgram shaderProg)
      V.mapM_ (\(l,t,v) -> renderPass l t v) lights
   where activateDefaultFramebuffer =
           do glBindFramebuffer GL_FRAMEBUFFER 0
@@ -266,7 +233,7 @@ renderFromCamera shaderProg lights pointIndex spotlightIndex lightsUBO =
              glCullFace GL_BACK
         renderDepthBuffer =
           do glClear GL_DEPTH_BUFFER_BIT
-             glUseProgram shaderProg
+             glUseProgram (unGLProgram shaderProg)
              liftIO . mapM_ drawSectorTextured =<< view sectors
         prepareMultipassRendering =
           do glEnable GL_BLEND
@@ -275,14 +242,7 @@ renderFromCamera shaderProg lights pointIndex spotlightIndex lightsUBO =
              glDepthFunc GL_EQUAL
              glDepthMask GL_FALSE
         renderPass l t v =
-          do liftIO (with v
-                          (\ptr ->
-                             do loc <- withCString "camV"
-                                                   (glGetUniformLocation shaderProg)
-                                glUniformMatrix4fv loc
-                                                   1
-                                                   0
-                                                   (castPtr (ptr :: Ptr (M44 CFloat)))))
+          do setUniform shaderProg "camV" v
              let i =
                    case lightShape l of
                      Omni -> pointIndex

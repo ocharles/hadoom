@@ -1,19 +1,20 @@
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE RecordWildCards #-}
 module Shader where
 
 import Prelude hiding (any, floor, ceiling)
 
 import Control.Monad (when)
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Foreign
 import Foreign.C.String
 import Graphics.GL
+import Linear
+import Paths_hadoom
 import Util
-
 import qualified Data.ByteString as BS
 import qualified Data.Text.Encoding as Text
 import qualified Data.Text.IO as Text
-
-import Paths_hadoom
 
 newtype GLProgram =
   GLProgram {unGLProgram :: GLuint}
@@ -64,3 +65,22 @@ normalAttribute = 1
 tangentAttribute = 2
 bitangentAttribute = 3
 uvAttribute = 4
+
+class Uniform a where
+  setUniformLoc :: MonadIO m => GLint -> a -> m ()
+
+setUniform :: (MonadIO m, Uniform a) => GLProgram -> String -> a -> m ()
+setUniform (GLProgram shaderProg) name a =
+  do loc <- liftIO (withCString name
+                                (glGetUniformLocation shaderProg))
+     glUseProgram shaderProg
+     setUniformLoc loc a
+
+instance Storable a => Uniform (M44 a) where
+  setUniformLoc loc m =
+    liftIO (with m
+                 (glUniformMatrix4fv loc 1 0 .
+                  castPtr))
+
+instance Uniform Int32 where
+  setUniformLoc = glUniform1i
