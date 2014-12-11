@@ -265,22 +265,25 @@ hadoom sectors win =
                glDisable GL_BLEND
                glDepthMask GL_TRUE
                glDepthFunc GL_LEQUAL
-               glColorMask GL_FALSE GL_FALSE GL_FALSE GL_FALSE
                glUseProgram shadowShader
-               glBindFramebuffer GL_FRAMEBUFFER lightFBO
+               glBindFramebuffer GL_DRAW_FRAMEBUFFER lightFBO
                glViewport 0 0 shadowMapResolution shadowMapResolution
-               glDisable GL_CULL_FACE
+               glEnable GL_CULL_FACE
+               glCullFace GL_BACK
                lights' <- flip V.mapM
                                (V.zip lights lightTextures)
                                (\(l,GLTextureObject t) ->
                                   do case lightShape l of
                                        Spotlight dir _ _ rotationMatrix ->
                                          do glFramebufferTexture2D GL_FRAMEBUFFER
-                                                                   GL_DEPTH_ATTACHMENT
+                                                                   GL_COLOR_ATTACHMENT0
                                                                    GL_TEXTURE_2D
                                                                    t
                                                                    0
-                                            glClear GL_DEPTH_BUFFER_BIT
+                                            withArray [GL_COLOR_ATTACHMENT0]
+                                                      (glDrawBuffers 1)
+                                            glClear (GL_DEPTH_BUFFER_BIT .|.
+                                                     GL_COLOR_BUFFER_BIT)
                                             let v =
                                                   m33_to_m44 rotationMatrix !*!
                                                   mkTransformation 0
@@ -296,8 +299,10 @@ hadoom sectors win =
                                             forM_ sectors
                                                   (\s ->
                                                      case s of
-                                                       Sector{..} -> sectorDrawWalls >>
-                                                                       sectorDrawFloor)
+                                                       Sector{..} ->
+                                                         do sectorDrawWalls
+                                                            sectorDrawFloor
+                                                            sectorDrawCeiling)
                                             return (l,t,distribute v)
                                        Omni ->
                                          let v =
@@ -313,7 +318,6 @@ hadoom sectors win =
                mapM_ drawSectorTextured sectors
                glEnable GL_BLEND
                glBlendFunc GL_ONE GL_ONE
-               glColorMask GL_TRUE GL_TRUE GL_TRUE GL_TRUE
                glClear GL_COLOR_BUFFER_BIT
                glDepthFunc GL_EQUAL
                glDepthMask GL_FALSE

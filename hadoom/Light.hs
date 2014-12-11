@@ -66,19 +66,17 @@ genLightDepthMap :: IO GLTextureObject
 genLightDepthMap =
   do lightDepthMap <- overPtr (glGenTextures 1)
      glBindTexture GL_TEXTURE_2D lightDepthMap
-     glTexParameteri GL_TEXTURE_2D GL_TEXTURE_COMPARE_MODE GL_COMPARE_REF_TO_TEXTURE
-     glTexParameteri GL_TEXTURE_2D GL_TEXTURE_COMPARE_FUNC GL_LEQUAL
      glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MIN_FILTER GL_LINEAR
      glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MAG_FILTER GL_LINEAR
      glTexParameteri GL_TEXTURE_2D GL_TEXTURE_WRAP_S GL_CLAMP_TO_EDGE
      glTexParameteri GL_TEXTURE_2D GL_TEXTURE_WRAP_T GL_CLAMP_TO_EDGE
      glTexImage2D GL_TEXTURE_2D
                   0
-                  GL_DEPTH_COMPONENT24
+                  GL_R32F
                   shadowMapResolution
                   shadowMapResolution
                   0
-                  GL_DEPTH_COMPONENT
+                  GL_RED
                   GL_FLOAT
                   nullPtr
      return (GLTextureObject lightDepthMap)
@@ -89,6 +87,12 @@ newtype GLFramebufferObject =
 genLightFramebufferObject :: IO GLFramebufferObject
 genLightFramebufferObject =
   do lightFBO <- overPtr (glGenFramebuffers 1)
-     glBindFramebuffer GL_FRAMEBUFFER lightFBO
-     glDrawBuffer GL_NONE
+     glBindFramebuffer GL_DRAW_FRAMEBUFFER lightFBO
+     rbo <- overPtr (glGenRenderbuffers 1)
+     glBindRenderbuffer GL_RENDERBUFFER rbo
+     glRenderbufferStorage GL_RENDERBUFFER
+                           GL_DEPTH_COMPONENT
+                           shadowMapResolution
+                           shadowMapResolution
+     glBindRenderbuffer GL_RENDERBUFFER 0
      return (GLFramebufferObject lightFBO)

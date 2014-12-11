@@ -11,7 +11,7 @@ in vec3 lightEyeDirTangentSpace;
 in vec3 lightEyeDirEyeSpace;
 
 uniform sampler2D tex;
-uniform sampler2DShadow depthMap;
+uniform sampler2D depthMap;
 uniform sampler2D nmap;
 subroutine uniform lightRoutine lightContribution;
 
@@ -58,7 +58,9 @@ void main(void) {
 subroutine (lightRoutine)
 
 float spotlight() {
-  float visibility = texture(depthMap, shadowCoords.xyz / shadowCoords.w - vec3(0, 0, shadowMapBias));
+  vec3 shadowDiv = shadowCoords.xyz / shadowCoords.w;
+  float lightDepth = texture(depthMap, shadowDiv.xy).r;
+  float visibility = clamp(pow(exp(-80 * shadowDiv.z) * lightDepth, 6), 0, 1);
   float theta = dot(lightDirEyeSpace, -normalize(lightEyeDirEyeSpace));
 
   return visibility * smoothstep(0, 1, (theta - spotlightParams.cosConeRadius) / spotlightParams.cosPenumbraRadius);
