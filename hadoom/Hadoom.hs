@@ -76,9 +76,12 @@ data RenderData =
              ,_lightFBO :: GLuint
              ,_lightsUBO :: GLuint
              ,_sectors :: [Sector]
-             ,_lightTextures :: V.Vector GLTextureObject
+             ,_lightTextures :: V.Vector (GLTextureObject, GLTextureObject)
              ,_spotlightIndex :: GLuint
-             ,_pointIndex :: GLuint}
+             ,_pointIndex :: GLuint
+             ,_horizBlurProgram :: GLProgram
+             ,_vertBlurProgram :: GLProgram
+             ,_nullVao :: GLuint}
 
 makeClassy ''RenderData
 
@@ -110,10 +113,14 @@ hadoom sectors win =
         loadRenderData =
           do shaderProg <- createShaderProgram "shaders/vertex/projection-model.glsl"
                                                "shaders/fragment/solid-white.glsl"
-             spotlightIndex <- getSubroutineIndex shaderProg "spotlight"
-             pointIndex <- getSubroutineIndex shaderProg "omni"
              shadowShader <- createShaderProgram "shaders/vertex/shadow.glsl"
                                                  "shaders/fragment/depth.glsl"
+             vertBlur <- createShaderProgram "shaders/vertex/gauss-vert.glsl"
+                                             "shaders/fragment/gauss.glsl"
+             horizBlur <- createShaderProgram "shaders/vertex/gauss-horiz.glsl"
+                                              "shaders/fragment/gauss.glsl"
+             spotlightIndex <- getSubroutineIndex shaderProg "spotlight"
+             pointIndex <- getSubroutineIndex shaderProg "omni"
              let perspectiveMat :: M44 GLfloat
                  perspectiveMat =
                    perspective (pi / 180 * 40)
@@ -147,11 +154,12 @@ hadoom sectors win =
                         "nmap"
                         (2 :: Int32)
              lightFBO <- unGLFramebufferObject <$> genLightFramebufferObject
-             lightTextures <- V.replicateM 10 genLightDepthMap
+             lightTextures <- V.replicateM 10 ((,) <$> genLightDepthMap <*> genLightDepthMap)
              lightsUBO <- overPtr (glGenBuffers 1)
              glBindBuffer GL_UNIFORM_BUFFER lightsUBO
              blockIndex <- getUniformBlockIndex shaderProg "Light"
              glBindBufferBase GL_UNIFORM_BUFFER blockIndex lightsUBO
+             nullVaoId <- overPtr (glGenVertexArrays 1)
              return RenderData {_shadowShader = shadowShader
                                ,_lightFBO = lightFBO
                                ,_sectors = sectors
@@ -160,7 +168,9 @@ hadoom sectors win =
                                ,_pointIndex = pointIndex
                                ,_spotlightIndex = spotlightIndex
                                ,_lightsUBO = lightsUBO
-                               }
+                               ,_horizBlurProgram = horizBlur
+                               ,_vertBlurProgram = vertBlur
+                               ,_nullVao = nullVaoId}
 
 --------------------------------------------------------------------------------
 renderLightDepthTextures :: (Applicative m, MonadIO m, MonadReader r m, HasRenderData r)
@@ -177,39 +187,58 @@ renderLightDepthTextures lights =
      glEnable GL_CULL_FACE
      glCullFace GL_BACK
      lightsWithTextures <- V.zip lights <$> view lightTextures
-     V.mapM (\(l,GLTextureObject t) ->
-               renderLightDepthTexture l t)
+     V.mapM (\(l,(GLTextureObject t1, GLTextureObject t2)) ->
+               renderLightDepthTexture l t1 t2)
             lightsWithTextures
 
 --------------------------------------------------------------------------------
-renderLightDepthTexture :: (Applicative m, MonadIO m, MonadReader r m, HasRenderData r)
+renderLightDepthTexture :: (Applicative m,MonadIO m,MonadReader r m,HasRenderData r)
                         => Light
                         -> GLuint
+                        -> GLuint
                         -> m (Light,GLuint,M44 CFloat)
-renderLightDepthTexture l t =
-  do case lightShape l of
-       Spotlight dir _ _ rotationMatrix ->
-         do glFramebufferTexture2D GL_FRAMEBUFFER GL_COLOR_ATTACHMENT0 GL_TEXTURE_2D t 0
-            liftIO (withArray [GL_COLOR_ATTACHMENT0]
-                              (glDrawBuffers 1))
-            glClear (GL_DEPTH_BUFFER_BIT .|. GL_COLOR_BUFFER_BIT)
-            let v =
-                  m33_to_m44 rotationMatrix !*!
-                  mkTransformation 0
-                                   (negate (lightPos l))
-            shader <- view shadowShader
-            setUniform shader "depthV" (distribute v)
-            joinMap (traverse_ (\Sector{..} ->
-                                  liftIO (do sectorDrawWalls
-                                             sectorDrawFloor
-                                             sectorDrawCeiling)))
-                    (view sectors)
-            return (l,t,distribute v)
-       Omni ->
-         let v =
-               mkTransformation 0
-                                (negate (lightPos l))
-         in return (l,t,distribute v)
+renderLightDepthTexture l t1 t2 =
+  do glEnable GL_DEPTH_TEST
+     v <- case lightShape l of
+            Spotlight dir _ _ rotationMatrix ->
+              let v =
+                    distribute
+                      (m33_to_m44 rotationMatrix !*!
+                       mkTransformation 0
+                                        (negate (lightPos l)))
+              in do renderDepthTexture v
+                    filterDepthTexture
+                    return v
+            Omni ->
+              return (distribute
+                        (mkTransformation 0
+                                          (negate (lightPos l))))
+     return (l,t1,v)
+  where renderDepthTexture v =
+          do glFramebufferTexture2D GL_FRAMEBUFFER GL_COLOR_ATTACHMENT0 GL_TEXTURE_2D t1 0
+             liftIO (withArray [GL_COLOR_ATTACHMENT0]
+                               (glDrawBuffers 1))
+             glClear (GL_DEPTH_BUFFER_BIT .|. GL_COLOR_BUFFER_BIT)
+             do s <- view shadowShader
+                setUniform s "depthV" v
+             joinMap (traverse_ (\Sector{..} ->
+                                   liftIO (do sectorDrawWalls
+                                              sectorDrawFloor
+                                              sectorDrawCeiling)))
+                     (view sectors)
+        blurPass srcT destT (GLProgram program) = do
+          do glFramebufferTexture2D GL_FRAMEBUFFER GL_COLOR_ATTACHMENT0 GL_TEXTURE_2D destT 0
+             glActiveTexture GL_TEXTURE0
+             glBindTexture GL_TEXTURE_2D srcT
+             glUseProgram program
+             glClear (GL_COLOR_BUFFER_BIT .|. GL_DEPTH_BUFFER_BIT)
+             glDrawArrays GL_TRIANGLES 0 3
+        filterDepthTexture =
+          do glBindVertexArray =<< view nullVao
+             glDisable GL_BLEND
+             glDepthFunc GL_LEQUAL
+             blurPass t1 t2 =<< view horizBlurProgram
+             blurPass t2 t1 =<< view vertBlurProgram
 
 --------------------------------------------------------------------------------
 renderFromCamera :: (MonadIO m, MonadReader r m, HasRenderData r)
