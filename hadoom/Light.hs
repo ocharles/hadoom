@@ -94,5 +94,5 @@ genLightFramebufferObject =
                            GL_DEPTH_COMPONENT
                            shadowMapResolution
                            shadowMapResolution
-     glBindRenderbuffer GL_RENDERBUFFER 0
+     glFramebufferRenderbuffer GL_FRAMEBUFFER GL_DEPTH_ATTACHMENT GL_RENDERBUFFER rbo
      return (GLFramebufferObject lightFBO)

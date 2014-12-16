@@ -68,3 +68,16 @@ camera. This doesn't seem correct to me, as my understanding is that we are
 projecting the depth the camera sees onto the scene, so the column depth should
 be projected directly onto the column, and not the floor below it. I'd like to
 verify if this is a bug or correct before moving on.
+
+** <2014-12-16 Tue 11:07>
+
+I solved the last problem mentioned above. While I thought that the projection
+was wrong, it turns out there isn't a problem there at all. The problem was this
+one missing line from when I set up the light's framebuffer object:
+
+     glFramebufferRenderbuffer GL_FRAMEBUFFER GL_DEPTH_ATTACHMENT GL_RENDERBUFFER rbo
+
+That's right - I built the framebuffer object that will be used to render the
+light, but I forgot to attach the render bufffer that will be used to store
+depth information! Thus the weird projection was actually due to a badly drawn
+depth buffer, as I wasn't making use of a depth buffer while rendering it. Oops.
