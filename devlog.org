@@ -81,3 +81,23 @@ That's right - I built the framebuffer object that will be used to render the
 light, but I forgot to attach the render bufffer that will be used to store
 depth information! Thus the weird projection was actually due to a badly drawn
 depth buffer, as I wasn't making use of a depth buffer while rendering it. Oops.
+
+* <2014-12-16 Tue 15:23>
+
+I decided to just crack on with getting a variable penumbra width without doing
+any prefiltering at all, just to get an understanding of what it is I'm actually
+trying to do. Using brute force box filters, I finally have the results I'm
+looking for! I begin by finding the average blocker depth - sampling a fixed
+size kernel around the sample point to find the depth of other points that would
+cast shadows. Once I know the average depth of blockers around this point, I can
+use this to determine the size of the box filter to use during percentage closer
+filtering.
+
+Currently I've got this working with fairly small area lights and I am getting
+the results I'd expect. As the size of the area light increases, naturally the
+framerate drops rapidly - but this is to be expected as we're using O(n^2)
+filters.
+
+In the next few days, I should have an understanding of how to store the
+exponential data in my shadow map, at which point I can start looking at
+building a summed area table and getting back to constant time blurs.
