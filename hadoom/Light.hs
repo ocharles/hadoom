@@ -60,24 +60,24 @@ instance Storable Light where
             y
 
 shadowMapResolution :: GLsizei
-shadowMapResolution = 256
+shadowMapResolution = 2048
 
 genLightDepthMap :: IO GLTextureObject
 genLightDepthMap =
   do lightDepthMap <- overPtr (glGenTextures 1)
      glBindTexture GL_TEXTURE_2D lightDepthMap
-     glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MIN_FILTER GL_LINEAR
-     glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MAG_FILTER GL_LINEAR
+     glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MIN_FILTER GL_NEAREST
+     glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MAG_FILTER GL_NEAREST
      glTexParameteri GL_TEXTURE_2D GL_TEXTURE_WRAP_S GL_CLAMP_TO_EDGE
      glTexParameteri GL_TEXTURE_2D GL_TEXTURE_WRAP_T GL_CLAMP_TO_EDGE
      glTexImage2D GL_TEXTURE_2D
                   0
-                  GL_R32F
+                  GL_RG32UI
                   shadowMapResolution
                   shadowMapResolution
                   0
-                  GL_RED
-                  GL_FLOAT
+                  GL_RG_INTEGER
+                  GL_UNSIGNED_INT
                   nullPtr
      return (GLTextureObject lightDepthMap)
 

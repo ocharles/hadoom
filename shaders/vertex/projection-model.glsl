@@ -20,6 +20,7 @@ out vec3 lightDirEyeSpace;
 out vec3 lightEyeDirTangentSpace;
 out vec3 lightEyeDirEyeSpace;
 out vec3 _norm;
+out vec3 wp;
 
 struct LightInfo {
   vec3 pos;
@@ -39,13 +40,14 @@ layout(std140) uniform Light {
 };
 
 void main(void) {
-  vec4 wp = view * vec4(in_Position, 1);
-  vec3 worldPos = wp.xyz;
+  wp = in_Position;
+  vec4 vp = view * vec4(in_Position, 1);
+  vec3 worldPos = vp.xyz;
   texCoord = in_UV;
   shadowCoords = bias * lightProjection * camV * vec4(in_Position, 1);
   lightDirEyeSpace = (view * vec4(spotlightParams.direction, 0)).xyz;
   vec3 lightPosEye = (view * vec4(light.pos, 1)).xyz;
-  gl_Position = projection * view * vec4(in_Position, 1);
+  gl_Position = projection * vp;
 
   mat3 tbn = transpose(
     mat3(

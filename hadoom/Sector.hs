@@ -419,3 +419,9 @@ drawSectorTextured Sector{..} =
      sectorDrawFloor
      activateMaterial sectorCeilingMaterial
      sectorDrawCeiling
+
+drawSectorGeometry :: Sector -> IO ()
+drawSectorGeometry Sector{..} =
+  do sectorDrawWalls
+     sectorDrawFloor
+     sectorDrawCeiling

@@ -9,9 +9,10 @@ in vec4 shadowCoords;
 in vec3 lightDirEyeSpace;
 in vec3 lightEyeDirTangentSpace;
 in vec3 lightEyeDirEyeSpace;
+in vec3 wp;
 
 uniform sampler2D tex;
-uniform sampler2D depthMap;
+uniform usampler2D depthMap;
 uniform sampler2D nmap;
 subroutine uniform lightRoutine lightContribution;
 
@@ -34,13 +35,9 @@ layout(std140) uniform Light {
 
 const float minLight = 0.01;
 
-// Determined by bisecting 0.0001 and 0.001, and visually inspecting each step.
-// This comes out looking pretty good.
-const float shadowMapBias = 0.0008875;
-
 void main(void) {
   vec3 fragToLight = normalize(lightEyeDirTangentSpace);
-  vec3 normal = normalize(texture2D(nmap, texCoord).rgb * 2.0 - 1.0);
+  vec3 normal = vec3(0, 0, 1); // normalize(texture2D(nmap, texCoord).rgb * 2.0 - 1.0);
 
   float d = length(lightEyeDirEyeSpace);
   float b = 1.0 / (light.radius * light.radius * minLight);
@@ -48,7 +45,6 @@ void main(void) {
   float energy = clamp(dot(normal, fragToLight), 0, 1) / att;
 
   vec3 diffuse = texture2D(tex, texCoord).rgb;
-
   fragColor = vec4(lightContribution() * diffuse * light.color * energy, 1);
 }
 
@@ -59,13 +55,51 @@ subroutine (lightRoutine)
 
 float spotlight() {
   vec3 shadowDiv = shadowCoords.xyz / shadowCoords.w;
-  float lightDepth = texture(depthMap, shadowDiv.xy).r;
-  float visibility = clamp(pow(exp(-80 * shadowDiv.z) * lightDepth, 6), 0, 1);
+
+  float near = 1.0f;
+  float far = 20.0f;
+  float c = 88.0f;
+  float scale = 1073741824;
+
+  float pixel = 1.0f / 2048.0f;
+  uint lightDepthInt = texture(depthMap, shadowDiv.xy).r;
+
+  float ourDepth = (length(wp) - near) / (far - near);
+
+  float num = 0;
+  float denom = 0;
+  float cz = exp(-c * ourDepth);
+
+  float w = 15;
+
+  int bk = int(round(ourDepth * w));
+
+  for(int y = -bk; y <= bk; y++) {
+    for(int x = -bk; x <= bk; x++) {
+      float d = float(texture(depthMap, shadowDiv.xy + 1 * vec2(pixel * x, pixel * y)).r / scale);
+      num += clamp(cz * exp(c * d), 0, 1) * d;
+      denom += clamp(cz * exp(c * d), 0, 1);
+    }
+  }
+
+  float zavg = denom > 0 ? num / denom : 1;
+
+  float visibility = 0;
+  int k = int(round(zavg * w));
+
+  for(int y = -k; y <= k; y++) {
+    for(int x = -k; x <= k; x++) {
+      float d = float(texture(depthMap, shadowDiv.xy + 1 * vec2(pixel * x, pixel * y)).r / scale);
+      visibility += clamp(exp(-c * ourDepth) * exp(c * d), 0, 1);
+    }
+  }
+
+  visibility /= k > 0 ? (k * 2 + 1) * (k * 2 + 1) : 1;
+
   float theta = dot(lightDirEyeSpace, -normalize(lightEyeDirEyeSpace));
 
-  return visibility * smoothstep(0, 1, (theta - spotlightParams.cosConeRadius) / spotlightParams.cosPenumbraRadius);
+  return clamp(visibility, 0, 1) * smoothstep(0, 1, (theta - spotlightParams.cosConeRadius) / spotlightParams.cosPenumbraRadius);
 }
-
 
 ////////////////////////////////////////////////////////////////////////////////
 

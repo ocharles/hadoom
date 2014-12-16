@@ -10,14 +10,16 @@ module Hadoom where
 import Control.Applicative
 import Control.Exception (finally)
 import Control.Lens hiding (indices)
-import Control.Monad (forM, forM_)
+import Control.Monad (forM, forM_, replicateM_)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Loops (unfoldM)
 import Control.Monad.Reader (MonadReader)
 import Control.Monad.Trans.Reader (runReaderT)
+import Control.Monad.Trans.State.Strict (execStateT)
 import Data.Distributive (distribute)
 import Data.Foldable (traverse_)
 import Data.Function (fix)
+import Data.Tuple (swap)
 import Data.Maybe (fromMaybe)
 import Data.Time (getCurrentTime, diffUTCTime)
 import Foreign
@@ -27,7 +29,7 @@ import Light
 import Linear as L
 import Material
 import Physics
-import Prelude hiding (any, floor, ceiling)
+import Prelude hiding (any, floor)
 import Sector
 import Shader
 import Unsafe.Coerce (unsafeCoerce)
@@ -62,11 +64,11 @@ col4 =
 room :: V.Vector (V2 CFloat)
 room =
   V.foldl' (flip makeSimple)
-           [V2 (-5)
-               (-5)
-           ,V2 5 (-5)
-           ,V2 5 5
-           ,V2 (-5) 5]
+           [V2 (-15)
+               (-15)
+           ,V2 15 (-15)
+           ,V2 15 15
+           ,V2 (-15) 15]
            [col1,col2,col3,col4]
 
 --------------------------------------------------------------------------------
@@ -76,12 +78,13 @@ data RenderData =
              ,_lightFBO :: GLuint
              ,_lightsUBO :: GLuint
              ,_sectors :: [Sector]
-             ,_lightTextures :: V.Vector (GLTextureObject, GLTextureObject)
+             ,_lightTextures :: V.Vector (GLTextureObject,GLTextureObject)
              ,_spotlightIndex :: GLuint
              ,_pointIndex :: GLuint
              ,_horizBlurProgram :: GLProgram
              ,_vertBlurProgram :: GLProgram
-             ,_nullVao :: GLuint}
+             ,_nullVao :: GLuint
+             }
 
 makeClassy ''RenderData
 
@@ -154,7 +157,9 @@ hadoom sectors win =
                         "nmap"
                         (2 :: Int32)
              lightFBO <- unGLFramebufferObject <$> genLightFramebufferObject
-             lightTextures <- V.replicateM 10 ((,) <$> genLightDepthMap <*> genLightDepthMap)
+             lightTextures <- V.replicateM
+                                10
+                                ((,) <$> genLightDepthMap <*> genLightDepthMap)
              lightsUBO <- overPtr (glGenBuffers 1)
              glBindBuffer GL_UNIFORM_BUFFER lightsUBO
              blockIndex <- getUniformBlockIndex shaderProg "Light"
@@ -199,21 +204,21 @@ renderLightDepthTexture :: (Applicative m,MonadIO m,MonadReader r m,HasRenderDat
                         -> m (Light,GLuint,M44 CFloat)
 renderLightDepthTexture l t1 t2 =
   do glEnable GL_DEPTH_TEST
-     v <- case lightShape l of
-            Spotlight dir _ _ rotationMatrix ->
-              let v =
-                    distribute
-                      (m33_to_m44 rotationMatrix !*!
-                       mkTransformation 0
-                                        (negate (lightPos l)))
-              in do renderDepthTexture v
-                    filterDepthTexture
-                    return v
-            Omni ->
-              return (distribute
-                        (mkTransformation 0
-                                          (negate (lightPos l))))
-     return (l,t1,v)
+     (v,t') <- case lightShape l of
+                 Spotlight dir _ _ rotationMatrix ->
+                   let v =
+                         distribute
+                           (m33_to_m44 rotationMatrix !*!
+                            mkTransformation 0
+                                             (negate (lightPos l)))
+                   in do renderDepthTexture v
+                         return (v,t1)
+                 Omni ->
+                   return (distribute
+                             (mkTransformation 0
+                                               (negate (lightPos l)))
+                          ,t1)
+     return (l,t',v)
   where renderDepthTexture v =
           do glFramebufferTexture2D GL_FRAMEBUFFER GL_COLOR_ATTACHMENT0 GL_TEXTURE_2D t1 0
              liftIO (withArray [GL_COLOR_ATTACHMENT0]
@@ -221,24 +226,8 @@ renderLightDepthTexture l t1 t2 =
              glClear (GL_DEPTH_BUFFER_BIT .|. GL_COLOR_BUFFER_BIT)
              do s <- view shadowShader
                 setUniform s "depthV" v
-             joinMap (traverse_ (\Sector{..} ->
-                                   liftIO (do sectorDrawWalls
-                                              sectorDrawFloor
-                                              sectorDrawCeiling)))
+             joinMap (traverse_ (liftIO . drawSectorGeometry))
                      (view sectors)
-        blurPass srcT destT (GLProgram program) = do
-          do glFramebufferTexture2D GL_FRAMEBUFFER GL_COLOR_ATTACHMENT0 GL_TEXTURE_2D destT 0
-             glActiveTexture GL_TEXTURE0
-             glBindTexture GL_TEXTURE_2D srcT
-             glUseProgram program
-             glClear (GL_COLOR_BUFFER_BIT .|. GL_DEPTH_BUFFER_BIT)
-             glDrawArrays GL_TRIANGLES 0 3
-        filterDepthTexture =
-          do glBindVertexArray =<< view nullVao
-             glDisable GL_BLEND
-             glDepthFunc GL_LEQUAL
-             blurPass t1 t2 =<< view horizBlurProgram
-             blurPass t2 t1 =<< view vertBlurProgram
 
 --------------------------------------------------------------------------------
 renderFromCamera :: (MonadIO m, MonadReader r m, HasRenderData r)
@@ -260,7 +249,7 @@ renderFromCamera lights =
         renderDepthBuffer =
           do glClear GL_DEPTH_BUFFER_BIT
              glUseProgram . unGLProgram =<< view sceneShader
-             liftIO . mapM_ drawSectorTextured =<< view sectors
+             liftIO . mapM_ drawSectorGeometry =<< view sectors
         prepareMultipassRendering =
           do glEnable GL_BLEND
              glBlendFunc GL_ONE GL_ONE
@@ -389,7 +378,7 @@ playHadoom =
                                                                                ,blueprintFloorMaterial = floor
                                                                                ,blueprintCeilingMaterial = ceiling
                                                                                ,blueprintWallMaterial = wall1})
-          hadoom [sectorLargeRoom,sectorCol1,sectorCol2,sectorCol3,sectorCol4] w)
+          hadoom [sectorCol1,sectorCol2,sectorCol3,sectorCol4,sectorLargeRoom] w)
 
 --------------------------------------------------------------------------------
 joinMap :: Monad m => (a -> m b) -> m a -> m b

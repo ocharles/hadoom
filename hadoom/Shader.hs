@@ -82,8 +82,15 @@ instance Storable a => Uniform (M44 a) where
                  (glUniformMatrix4fv loc 1 0 .
                   castPtr))
 
-instance Uniform Int32 where
+instance Uniform (V2 GLfloat) where
+  setUniformLoc loc (V2 x y) =
+    glUniform2f loc x y
+
+instance Uniform GLint where
   setUniformLoc = glUniform1i
+
+instance Uniform GLfloat where
+  setUniformLoc = glUniform1f
 
 getSubroutineIndex :: MonadIO m => GLProgram -> String -> m GLuint
 getSubroutineIndex (GLProgram p) subroutine =
