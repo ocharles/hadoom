@@ -1,0 +1,70 @@
+#+TITLE: Hadoom Developer Log
+
+* <2014-12-15 Mon>
+
+Spent most of the day continuing work on attempting to implement the ideas in
+the paper "exponential soft shadow mapping", though didn't reach the desired
+solution. Spent a lot of time trying to successfully render into an integer
+texture. The following checklist should help me avoid these problems in the
+future:
+
+1. Create the texture with =GL_RG32UI= (or another appropriate integer texture).
+2. Make sure to output using the correct type. Note that vectors have their own
+   types too! =vec2= is a vector of /floats/ - the aforementioned texture should
+   be used with a =uvec2=.
+3. Make sure to use the correct type of sampler. There are samplers for each
+   type - =GL_RG32UI= should be sampled with =usampler2D=.
+4. Make sure to sample with the generic =texture()= function.
+
+To store floating point values in an integer texture, we can either
+
+1. Use =floatBitsToInt= -- essentially a "reinterpreting" cast.
+2. Scale the float (assumed to be in the range [0, 1]) by 2^n, where =n= is the
+   amount of bits of precision required.
+
+WARNING! The expression =2^n= in GLSL does *not* mean what you might think it
+means. =^= is the operator for bitwise XOR. We should use =exp2= to raise 2 to
+an arbitrary power. However, there was *another* problem - scaling by =exp2(16)=
+seemed to be ok, but scaling by =exp2(17)= was not. It seems that we have to use
+a =double= rather than a =float=, or Strange Things happen. I should revisit
+this at some point to form a better understanding of what's going wrong.
+
+Past that hurdle, I was able to successfully store various depths in my integer
+depth texture. I believe, from reading the paper, that I should be storing
+=exp(cz)= in the texture, but I am only storing my (linear) =z= value:
+
+    fragmentdepth = ivec4(uint(round(esmNormalized * scale)));
+
+It's unclear to me how you store =exp(cz)= in the integer texture and later
+actually do something with it, as you have to scale it to [0, 1]. The scaling
+could be reversed, but I think I'm missing something here.
+
+I didn't get to make a start with their idea of "tiled" summed area tables, as I
+spent most of the time trying to work out how the blocker depth estimate
+works. I found another people with a better discussion of this - "Real-Time,
+All-Frequency Shadows in Dynamic Scenes". This paper lead me on to reading about
+"Convolution Shadow Maps", but importantly has a good discussion on estimating
+the blocker depth.
+
+* <2014-12-16 Tue>
+
+Started the day by wanting to look at computing the average blocker
+distance. Reading the "Real-Time, All-Frequency Shadows" paper again last night
+has made the computation clearer - you essentially perform the binary shadow
+test function and multiple the result against the depth of the point you are
+testing. If you average all of these, you get the average depth of blockers at a
+point. The use of the shadow function multiplied by the depth means we can use
+our same approximation to the shadow function, which means we can move the
+convolution to pre-filtering, provided we multiply the bias (exp(cz)) by the
+depth (so we store exp(cz)z).
+
+However, this means that my depth shader should be outputting exp(cz) and
+scaling it, which it doesn't currently do. I started by looking into that, but I
+haven't managed to get anything satisfactory yet.
+
+Another oddity came up during debugging - if I shade only the depth as seen by
+the light, for some reason the column appears *below* the column as scene by the
+camera. This doesn't seem correct to me, as my understanding is that we are
+projecting the depth the camera sees onto the scene, so the column depth should
+be projected directly onto the column, and not the floor below it. I'd like to
+verify if this is a bug or correct before moving on.
