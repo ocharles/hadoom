@@ -19,8 +19,9 @@ out vec4 shadowCoords;
 out vec3 lightDirEyeSpace;
 out vec3 lightEyeDirTangentSpace;
 out vec3 lightEyeDirEyeSpace;
-out vec3 _norm;
+out vec3 norm;
 out vec3 wp;
+out vec3 lightDir;
 
 struct LightInfo {
   vec3 pos;
@@ -60,5 +61,6 @@ void main(void) {
   lightEyeDirEyeSpace = lightPosEye - worldPos;
   lightEyeDirTangentSpace = tbn * lightEyeDirEyeSpace;
 
-  _norm = in_Normal;
+  norm = in_Normal;
+  lightDir = light.pos - wp;
 }

@@ -36,7 +36,7 @@ scene =
    \t ->
      [Light (V3 0 2 0)
             (V3 1 1 1)
-            1000
+            50
             (Spotlight (lightDir (realToFrac (pi / 4)))
                        0.8
                        0.1

@@ -425,3 +425,6 @@ drawSectorGeometry Sector{..} =
   do sectorDrawWalls
      sectorDrawFloor
      sectorDrawCeiling
+
+drawSectorWalls :: Sector -> IO ()
+drawSectorWalls Sector{..} = sectorDrawWalls

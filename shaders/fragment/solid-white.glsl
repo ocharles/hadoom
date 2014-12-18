@@ -10,6 +10,8 @@ in vec3 lightDirEyeSpace;
 in vec3 lightEyeDirTangentSpace;
 in vec3 lightEyeDirEyeSpace;
 in vec3 wp;
+in vec3 norm;
+in vec3 lightDir;
 
 uniform sampler2D tex;
 uniform usampler2D depthMap;
@@ -33,14 +35,14 @@ layout(std140) uniform Light {
   SpotlightInfo spotlightParams;
 };
 
-const float minLight = 0.01;
+const float minLight = 0.003;
 
 void main(void) {
   vec3 fragToLight = normalize(lightEyeDirTangentSpace);
-  vec3 normal = vec3(0, 0, 1); // normalize(texture2D(nmap, texCoord).rgb * 2.0 - 1.0);
+  vec3 normal = normalize(texture2D(nmap, texCoord).rgb * 2.0 - 1.0);
 
   float d = length(lightEyeDirEyeSpace);
-  float b = 1.0 / (light.radius * light.radius * minLight);
+  float b = 1.0 / (4 * light.radius * light.radius * minLight);
   float att = 1 + b * d * d;
   float energy = clamp(dot(normal, fragToLight), 0, 1) / att;
 
@@ -48,57 +50,92 @@ void main(void) {
   fragColor = vec4(lightContribution() * diffuse * light.color * energy, 1);
 }
 
-
 ////////////////////////////////////////////////////////////////////////////////
 
+const float blockerSearchSamples = 6;
+const float pcfSamples = 10;
+const float scale = 1073741824;
+const float lightSize = 0.05;
+const float c = 70.0f;
+const float pixel = 1.0f / 2048.0f;
+
+float estimateBlockerDepth (vec2 shadowCoords, float depth, float searchWidth, out bool blocked) {
+  float stepSize = 2 * searchWidth / blockerSearchSamples;
+
+  shadowCoords -= vec2(searchWidth);
+
+  float blockerSum = 0;
+  float blockerCount = 0;
+
+  for (int i = 0; i < blockerSearchSamples; i++) {
+    for (int j = 0; j < blockerSearchSamples; j++) {
+      float blockerDepth = texture(depthMap, shadowCoords + vec2(i, j) * stepSize) / scale;
+      if (blockerDepth < depth) {
+        blockerSum += blockerDepth;
+        blockerCount++;
+        blocked = true;
+      }
+    }
+  }
+
+  return blockerSum / blockerCount;
+}
+
+float estimatePenumbraWidth(vec2 shadowCoords, float depth, float blockerDepth) {
+  return (depth - blockerDepth) * lightSize / blockerDepth;
+}
+
+float pcfDepthTest(vec2 uv, float depth, float filterWidth) {
+  float stepSize = 2 * filterWidth / pcfSamples;
+  uv -= vec2(filterWidth);
+
+  float successes = 0;
+
+  depth *= 0.98;
+  float tests = 0;
+  for (int i = 0; i < pcfSamples; i++) {
+    for (int j = 0; j < pcfSamples; j++) {
+      float tl = texture(depthMap, uv + vec2(i, j) * stepSize) / scale;
+      float tr = texture(depthMap, uv + vec2(i, j) * stepSize + vec2(pixel, 0)) / scale;
+      float bl = texture(depthMap, uv + vec2(i, j) * stepSize + vec2(0, pixel)) / scale;
+      float br = texture(depthMap, uv + vec2(i, j) * stepSize + vec2(pixel, pixel)) / scale;
+      vec2 f = fract((uv + vec2(i, j) * stepSize) * 2048);
+
+      tests += mix(mix(tl < depth ? 0 : 1, tr < depth ? 0 : 1, f.x),
+                   mix(bl < depth ? 0 : 1, br < depth ? 0 : 1, f.x),
+                   f.y);
+    }
+  }
+
+  return tests / (pcfSamples * pcfSamples);
+}
+
 subroutine (lightRoutine)
-
 float spotlight() {
-  vec3 shadowDiv = shadowCoords.xyz / shadowCoords.w;
-
-  float near = 1.0f;
-  float far = 20.0f;
-  float c = 88.0f;
-  float scale = 1073741824;
-
-  float pixel = 1.0f / 2048.0f;
-  uint lightDepthInt = texture(depthMap, shadowDiv.xy).r;
-
-  float ourDepth = (length(wp) - near) / (far - near);
-
-  float num = 0;
-  float denom = 0;
-  float cz = exp(-c * ourDepth);
-
-  float w = 15;
-
-  int bk = int(round(ourDepth * w));
-
-  for(int y = -bk; y <= bk; y++) {
-    for(int x = -bk; x <= bk; x++) {
-      float d = float(texture(depthMap, shadowDiv.xy + 1 * vec2(pixel * x, pixel * y)).r / scale);
-      num += clamp(cz * exp(c * d), 0, 1) * d;
-      denom += clamp(cz * exp(c * d), 0, 1);
-    }
-  }
-
-  float zavg = denom > 0 ? num / denom : 1;
-
-  float visibility = 0;
-  int k = int(round(zavg * w));
-
-  for(int y = -k; y <= k; y++) {
-    for(int x = -k; x <= k; x++) {
-      float d = float(texture(depthMap, shadowDiv.xy + 1 * vec2(pixel * x, pixel * y)).r / scale);
-      visibility += clamp(exp(-c * ourDepth) * exp(c * d), 0, 1);
-    }
-  }
-
-  visibility /= k > 0 ? (k * 2 + 1) * (k * 2 + 1) : 1;
-
   float theta = dot(lightDirEyeSpace, -normalize(lightEyeDirEyeSpace));
+  if (theta >= spotlightParams.cosConeRadius) {
+    vec3 shadowDiv = shadowCoords.xyz / shadowCoords.w;
 
-  return clamp(visibility, 0, 1) * smoothstep(0, 1, (theta - spotlightParams.cosConeRadius) / spotlightParams.cosPenumbraRadius);
+    float near = 1.0f;
+    float far = 100.0f;
+    float ourDepth = (length(wp - vec3(0, 2, 0)) - near) / (far - near);
+
+    bool blocked = true;
+    float blockerSearchSize = lightSize * ourDepth;
+    float blockerDepth = estimateBlockerDepth(shadowDiv.xy, ourDepth, blockerSearchSize, blocked);
+
+    float visibility = 1.0f;
+    if(blocked) {
+      float penumbra = estimatePenumbraWidth(shadowDiv.xy, ourDepth, blockerDepth);
+      penumbra = ((ourDepth - blockerDepth) * blockerSearchSize) / blockerDepth;
+      visibility = pcfDepthTest(shadowDiv.xy, ourDepth, min(penumbra, blockerSearchSize)); // penumbra);
+    }
+
+    return clamp(visibility, 0, 1) * smoothstep(0, 1, (theta - spotlightParams.cosConeRadius) / spotlightParams.cosPenumbraRadius);
+  }
+  else {
+    return 0;
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -7,8 +7,8 @@ in vec3 wp;
 
 void main(){
   float near = 1.0f;
-  float far = 20.0f;
-  float z = (length(wp) - near) / (far - near);
+  float far = 100.0f;
+  float z = (length(wp - vec3(0, 2, 0)) - near) / (far - near);
 
   float scale = 1073741824; // 2 ^ 30
 
