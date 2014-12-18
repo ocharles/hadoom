@@ -46,6 +46,7 @@ All-Frequency Shadows in Dynamic Scenes". This paper lead me on to reading about
 "Convolution Shadow Maps", but importantly has a good discussion on estimating
 the blocker depth.
 
+
 * <2014-12-16 Tue>
 
 Started the day by wanting to look at computing the average blocker
@@ -82,6 +83,7 @@ light, but I forgot to attach the render bufffer that will be used to store
 depth information! Thus the weird projection was actually due to a badly drawn
 depth buffer, as I wasn't making use of a depth buffer while rendering it. Oops.
 
+
 * <2014-12-16 Tue 15:23>
 
 I decided to just crack on with getting a variable penumbra width without doing
@@ -101,3 +103,47 @@ filters.
 In the next few days, I should have an understanding of how to store the
 exponential data in my shadow map, at which point I can start looking at
 building a summed area table and getting back to constant time blurs.
+
+
+* <2014-12-18 Thu>
+
+I've got to a point where I can reliably get results from the "percentage-closer
+soft shadows" work. I found the original shader online [1], which has let me
+understand more about the parameters in the implementation. I found out I was
+many orders of magnitude out on my parameters, which explains why I was
+struggling to reconcile my results with the paper. I am convinced the code has a
+bug though. Where they estimate the blocker depth search filter size with
+
+  lightSize / receiverDepth
+
+I am certain that the *correct* formula would be
+
+  lightSize * receiverDepth
+
+By my reasoning, the potential area of blockers around a point is directly
+proportional to its distance from the light. As we move away from the (area)
+light source, the frustum formed by the point we are shading and the area light
+intersects with less of the fixed shadow map plane. Taking the limit of distance
+from the light, eventually the area light will be coincident with the shadow map
+plane, thus we would desire a search size of 1 - the entire plane. After coming
+back to this formula over and over again, I'm convinced it's the right one to
+use - and it seems to give pleasing results.
+
+I've understood more about what it means to filter shadow test
+results. Performing a bilinear filter on the shadow map tests has to be done
+after the shadow map test - so we sample 4 texels around our point, perform
+shadow map tests on each of them and *then* bilinearly interpolate. This smooths
+the edges, but with a big PCF kernel there is still very clear banding. I
+shouldn't spend any more time on this though, because having a non-linear
+spatial blur is never the goal anyway.
+
+Next I want to move all of the shadow tests to use the exponential shadow
+mapping approximation. Then I'll factor out the shadow map test from the
+convolution (as per "Convolution Shadow Mapping"). At this point, I might be
+able to start moving some of the calculation back to the light shader.
+
+One other niceity - I finally implemented the ability to refresh shaders while
+Hadoom is running. This makes a *huge* difference to my productivity. I might
+even go all the way to using inotify to automatically refresh the shaders.
+
+[1]: http://www.gamedev.net/topic/486151-soft-shadow-pcss/
