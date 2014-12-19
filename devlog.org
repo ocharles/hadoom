@@ -147,3 +147,40 @@ Hadoom is running. This makes a *huge* difference to my productivity. I might
 even go all the way to using inotify to automatically refresh the shaders.
 
 [1]: http://www.gamedev.net/topic/486151-soft-shadow-pcss/
+
+* <2014-12-19 Fri>
+
+Following on from yesterday's plan, I started to move the tests from a binary
+shadow test to the exponential approximation. It has been... a learning
+process. My initial attempt was to simple take the mean =exp(c * blockerDepth)=
+value, and then take the product with =exp(-c * receiverDepth)=. Simple, right?
+Unfortunately, it glosses over the whole section of failure classification in
+the original research.
+
+It turns out I hadn't really given much thought to the assumption that the whole
+theory is built on -- /receiverDepth >= lightDepth/. That is to say a light
+never travels further than the point that the view camera is seeing. With an
+infinite resolution for the shadow map and no filtering, this would make sense -
+casting a ray from the shading fragment to the light source would intersect a
+blocker (so the assumption /receiverDepth > lightDepth/ holds), or the
+light-to-fragment and light-to-blocker depths are equal. However, in practice we
+don't have an infinite resolution to work with, adn the paper clearly shows how
+this assumption /will/ be violated.
+
+A violation leads to the final shadow result tending to infinity. This gets even
+/worse/ when you incorporate =exp(c * blockerDepth)= into a blur kernel, as a
+single bad test blows the whole test to infinity. Clamping prevents
+overbrighting, but you now lose out on gradual blurs. Bummer.
+
+The paper has two classifiers for identifying this problem. I've gone with their
+thresholding classification, and once you use this, the results are almost back
+to the "reference" results from brute force PCF with the binary shadow test.
+
+I'm currently battling with one oddity around the edge of the penumbra, where
+the shadow test fails. The paper suggests that one can fall back to PCF here,
+but at this point my results are very different from the ESM test, so there's a
+clear discontinuity. Hopefully I can solve this soon.
+
+I'm almost at a stage where I can move =exp(c * blockerDepth)= to the shadow
+map. The only place where I rely on the linear depth from the shadow map is in
+the blocker depth estimation, so that is my next focus.

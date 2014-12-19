@@ -247,7 +247,7 @@ renderLightDepthTexture l t1 t2 =
              glClearColor 0 0 0 0
              do s <- use shadowShader
                 setUniform s "depthV" v
-             joinMap (traverse_ (liftIO . drawSectorWalls))
+             joinMap (traverse_ (liftIO . drawSectorGeometry))
                      (view sectors)
 
 --------------------------------------------------------------------------------

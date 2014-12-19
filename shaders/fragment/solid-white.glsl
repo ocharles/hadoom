@@ -55,9 +55,12 @@ void main(void) {
 const float blockerSearchSamples = 6;
 const float pcfSamples = 10;
 const float scale = 1073741824;
-const float lightSize = 0.05;
-const float c = 70.0f;
-const float pixel = 1.0f / 2048.0f;
+const float lightSize = 0.03;
+const float c = 88.0f;
+const float shadowMapSize = 2048.0f;
+const float pixel = 1.0f / shadowMapSize;
+const float esmEpsilon = 0.001;
+const float depthBiasFactor = 1.15;
 
 float estimateBlockerDepth (vec2 shadowCoords, float depth, float searchWidth, out bool blocked) {
   float stepSize = 2 * searchWidth / blockerSearchSamples;
@@ -85,29 +88,29 @@ float estimatePenumbraWidth(vec2 shadowCoords, float depth, float blockerDepth) 
   return (depth - blockerDepth) * lightSize / blockerDepth;
 }
 
-float pcfDepthTest(vec2 uv, float depth, float filterWidth) {
+float esmDepthTest(vec2 uv, float depth, float filterWidth, out bool failed) {
   float stepSize = 2 * filterWidth / pcfSamples;
   uv -= vec2(filterWidth);
 
-  float successes = 0;
-
-  depth *= 0.98;
-  float tests = 0;
+  float esm = 0;
   for (int i = 0; i < pcfSamples; i++) {
     for (int j = 0; j < pcfSamples; j++) {
       float tl = texture(depthMap, uv + vec2(i, j) * stepSize) / scale;
       float tr = texture(depthMap, uv + vec2(i, j) * stepSize + vec2(pixel, 0)) / scale;
       float bl = texture(depthMap, uv + vec2(i, j) * stepSize + vec2(0, pixel)) / scale;
       float br = texture(depthMap, uv + vec2(i, j) * stepSize + vec2(pixel, pixel)) / scale;
-      vec2 f = fract((uv + vec2(i, j) * stepSize) * 2048);
+      vec2 f = fract((uv + vec2(i, j) * stepSize) * shadowMapSize);
 
-      tests += mix(mix(tl < depth ? 0 : 1, tr < depth ? 0 : 1, f.x),
-                   mix(bl < depth ? 0 : 1, br < depth ? 0 : 1, f.x),
-                   f.y);
+      esm += mix(mix(exp(tl * c), exp(tr * c), f.x),
+                 mix(exp(bl * c), exp(br * c), f.x),
+                 f.y);
     }
   }
 
-  return tests / (pcfSamples * pcfSamples);
+  float esmTest = (esm / (pcfSamples * pcfSamples)) * exp(-c * (depth * depthBiasFactor));
+
+  failed = esmTest >= 1 + esmEpsilon;
+  return esmTest;
 }
 
 subroutine (lightRoutine)
@@ -115,12 +118,11 @@ float spotlight() {
   float theta = dot(lightDirEyeSpace, -normalize(lightEyeDirEyeSpace));
   if (theta >= spotlightParams.cosConeRadius) {
     vec3 shadowDiv = shadowCoords.xyz / shadowCoords.w;
-
     float near = 1.0f;
     float far = 100.0f;
-    float ourDepth = (length(wp - vec3(0, 2, 0)) - near) / (far - near);
+    float ourDepth = (length(wp - light.pos) - near) / (far - near);
 
-    bool blocked = true;
+    bool blocked;
     float blockerSearchSize = lightSize * ourDepth;
     float blockerDepth = estimateBlockerDepth(shadowDiv.xy, ourDepth, blockerSearchSize, blocked);
 
@@ -128,7 +130,10 @@ float spotlight() {
     if(blocked) {
       float penumbra = estimatePenumbraWidth(shadowDiv.xy, ourDepth, blockerDepth);
       penumbra = ((ourDepth - blockerDepth) * blockerSearchSize) / blockerDepth;
-      visibility = pcfDepthTest(shadowDiv.xy, ourDepth, min(penumbra, blockerSearchSize)); // penumbra);
+      bool esmFailed;
+      visibility = esmDepthTest(shadowDiv.xy, ourDepth, min(penumbra, blockerSearchSize), esmFailed);
+
+      if (esmFailed) visibility = 1;
     }
 
     return clamp(visibility, 0, 1) * smoothstep(0, 1, (theta - spotlightParams.cosConeRadius) / spotlightParams.cosPenumbraRadius);
