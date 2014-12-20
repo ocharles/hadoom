@@ -1,9 +1,11 @@
 #version 400 core
 
 // Ouput data
-layout(location = 0) out highp uvec4 fragmentdepth;
+layout(location = 0) out highp vec4 fragmentdepth;
 
 in vec3 wp;
+
+const float c = 80.0f;
 
 void main(){
   float near = 1.0f;
@@ -12,5 +14,5 @@ void main(){
 
   float scale = 1073741824; // 2 ^ 30
 
-  fragmentdepth = uvec4(round(vec4(z * scale)));
+  fragmentdepth = vec4(exp(c * z), exp(c * z) * z, 0, 0);
 }

@@ -77,8 +77,6 @@ data RenderData =
   RenderData {_lightFBO :: GLuint
              ,_sectors :: [Sector]
              ,_lightTextures :: V.Vector (GLTextureObject,GLTextureObject)
-             ,_horizBlurProgram :: GLProgram
-             ,_vertBlurProgram :: GLProgram
              ,_nullVao :: GLuint
              }
 
@@ -88,6 +86,7 @@ makeClassy ''RenderData
 data Shaders = Shaders
     { _shadowShader :: GLProgram
     ,_sceneShader :: GLProgram
+    ,_satProgram :: GLProgram
     ,_spotlightIndex :: GLuint
     ,_pointIndex :: GLuint
     ,_lightsUBO :: GLuint
@@ -134,6 +133,7 @@ hadoom sectors win =
                                                "shaders/fragment/solid-white.glsl"
              shadowShader <- createShaderProgram "shaders/vertex/shadow.glsl"
                                                  "shaders/fragment/depth.glsl"
+             satShader <- createShaderProgram "shaders/vertex/sat.glsl" "shaders/fragment/sat.glsl"
              spotlightIndex <- getSubroutineIndex shaderProg "spotlight"
              pointIndex <- getSubroutineIndex shaderProg "omni"
              do let perspectiveMat :: M44 GLfloat
@@ -174,6 +174,7 @@ hadoom sectors win =
              glBindBufferBase GL_UNIFORM_BUFFER blockIndex lightsUBO
              return Shaders {_sceneShader = shaderProg
                             ,_shadowShader = shadowShader
+                            ,_satProgram = satShader
                             ,_spotlightIndex = spotlightIndex
                             ,_pointIndex = pointIndex
                             ,_lightsUBO = lightsUBO}
@@ -191,8 +192,6 @@ hadoom sectors win =
                    RenderData {_sectors = sectors
                               ,_lightFBO = lightFBO
                               ,_lightTextures = lightTextures
-                              ,_horizBlurProgram = horizBlur
-                              ,_vertBlurProgram = vertBlur
                               ,_nullVao = nullVaoId}
              return static
 
@@ -231,6 +230,7 @@ renderLightDepthTexture l t1 t2 =
                             mkTransformation 0
                                              (negate (lightPos l)))
                    in do renderDepthTexture v
+                         computeSummedAreaTable
                          return (v,t1)
                  Omni ->
                    return (distribute
@@ -249,6 +249,41 @@ renderLightDepthTexture l t1 t2 =
                 setUniform s "depthV" v
              joinMap (traverse_ (liftIO . drawSectorGeometry))
                      (view sectors)
+        satPass p n =
+          do (src,dst) <- use id
+             glFramebufferTexture2D GL_FRAMEBUFFER GL_COLOR_ATTACHMENT0 GL_TEXTURE_2D dst 0
+             setUniform p
+                        "jump"
+                        (2 ^ n :: GLint)
+             glBindTexture GL_TEXTURE_2D src
+             glClear (GL_COLOR_BUFFER_BIT .|. GL_DEPTH_BUFFER_BIT)
+             glDrawArrays GL_TRIANGLES 0 3
+             id %= swap
+        computeSummedAreaTable =
+          do glBindVertexArray =<< view nullVao
+             glDisable GL_BLEND
+             glDepthFunc GL_LEQUAL
+             p <- use satProgram
+             glUseProgram (unGLProgram p)
+             glActiveTexture GL_TEXTURE0
+             setUniform p
+                        "pixelSize"
+                        (1.0 / fromIntegral shadowMapResolution :: GLfloat)
+             (src,_) <- execStateT
+                          (do setUniform p
+                                         "basis"
+                                         (V2 1 0 :: V2 GLfloat)
+                              mapM_ (satPass p)
+                                    [0 .. satPasses]
+                              setUniform p
+                                         "basis"
+                                         (V2 0 1 :: V2 GLfloat)
+                              mapM_ (satPass p)
+                                    [0 .. satPasses])
+                          (t1,t2)
+             return src
+
+satPasses = ceiling (logBase 2 (fromIntegral shadowMapResolution))
 
 --------------------------------------------------------------------------------
 renderFromCamera :: (MonadIO m, MonadReader r m, HasRenderData r, HasShaders s, MonadState s m)

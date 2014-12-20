@@ -148,6 +148,7 @@ even go all the way to using inotify to automatically refresh the shaders.
 
 [1]: http://www.gamedev.net/topic/486151-soft-shadow-pcss/
 
+
 * <2014-12-19 Fri>
 
 Following on from yesterday's plan, I started to move the tests from a binary
@@ -184,3 +185,25 @@ clear discontinuity. Hopefully I can solve this soon.
 I'm almost at a stage where I can move =exp(c * blockerDepth)= to the shadow
 map. The only place where I rely on the linear depth from the shadow map is in
 the blocker depth estimation, so that is my next focus.
+
+** <2014-12-20 Sat>
+
+At long last I reached the moment I had been aiming for - percentage closer
+shadow mapping driven entirely by summed area tables! I spent a bit of time
+working with getting the exponential terms into the shadow map texture, mostly
+taking longer than necessary because I wasn't being careful (=exp(c *
+texture(...))= - for example!). Once I got that out of the way, I started to
+think about what to do with the SAT.
+
+I convinced myself a while ago that an integer texture was the way to go, but I
+never actually put much work into the floating point texture. Once I let go of
+that fear, I pulled out the summed area table code I had written earlier,
+dropped it in and things almost entirely work!
+
+I'm now encountering noise and errorenous results in *some* parts of the final
+shadowing, but it looks solvable. The "Fast local tone-mapping" paper suggests
+building the summed area table around the mean, which might recover
+precision. Another option is to try the "distribute precision" hack from before,
+and to use two channels.
+
+Anyway, very happy that at long last - I'm finally at the first real goal. Exciting.
