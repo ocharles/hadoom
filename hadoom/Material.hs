@@ -29,8 +29,8 @@ loadTexture path colorSpace =
        Right dimg ->
          do t <- overPtr (glGenTextures 1)
             glBindTexture GL_TEXTURE_2D t
-            glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MIN_FILTER GL_LINEAR
-            glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MAG_FILTER GL_LINEAR
+            glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MIN_FILTER GL_LINEAR_MIPMAP_LINEAR
+            glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MAG_FILTER GL_LINEAR_MIPMAP_LINEAR
             glPixelStorei GL_UNPACK_LSB_FIRST 0
             glPixelStorei GL_UNPACK_SWAP_BYTES 0
             glPixelStorei GL_UNPACK_ROW_LENGTH 0
