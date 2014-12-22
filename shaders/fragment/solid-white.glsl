@@ -47,10 +47,10 @@ const float depthBiasFactor = 1.2;
 
 vec4 sampleSat(vec2 uv, float size) {
   vec4 sum =
-            texture(depthMap, uv)
-          - texture(depthMap, uv + size * vec2(pixel, 0))
-          - texture(depthMap, uv + size * vec2(0, pixel))
-          + texture(depthMap, uv + size * vec2(pixel, pixel));
+            textureLod(depthMap, uv, 0)
+          - textureLod(depthMap, uv + size * vec2(pixel, 0), 0)
+          - textureLod(depthMap, uv + size * vec2(0, pixel), 0)
+          + textureLod(depthMap, uv + size * vec2(pixel, pixel), 0);
 
   return (sum / (size * size)) + mean;
 }
