@@ -11,6 +11,7 @@ import Control.Applicative
 import Control.Exception (finally)
 import Control.Lens hiding (indices)
 import Control.Monad (forM, forM_, replicateM_, when)
+import Control.Monad.Trans.Class (lift)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Loops (unfoldM)
 import Control.Monad.Reader (MonadReader)
@@ -90,6 +91,7 @@ data Shaders = Shaders
     ,_spotlightIndex :: GLuint
     ,_pointIndex :: GLuint
     ,_lightsUBO :: GLuint
+    ,_reduceByAverage :: GLProgram
     }
 
 makeClassy ''Shaders
@@ -134,6 +136,8 @@ hadoom sectors win =
              shadowShader <- createShaderProgram "shaders/vertex/shadow.glsl"
                                                  "shaders/fragment/depth.glsl"
              satShader <- createShaderProgram "shaders/vertex/sat.glsl" "shaders/fragment/sat.glsl"
+             reduce <- createShaderProgram "shaders/vertex/sat.glsl"
+                                           "shaders/fragment/subtract-mean.glsl"
              spotlightIndex <- getSubroutineIndex shaderProg "spotlight"
              pointIndex <- getSubroutineIndex shaderProg "omni"
              do let perspectiveMat :: M44 GLfloat
@@ -177,7 +181,8 @@ hadoom sectors win =
                             ,_satProgram = satShader
                             ,_spotlightIndex = spotlightIndex
                             ,_pointIndex = pointIndex
-                            ,_lightsUBO = lightsUBO}
+                            ,_lightsUBO = lightsUBO
+                            ,_reduceByAverage = reduce}
         loadRenderData =
           do vertBlur <- createShaderProgram "shaders/vertex/gauss-vert.glsl"
                                              "shaders/fragment/gauss.glsl"
@@ -249,37 +254,57 @@ renderLightDepthTexture l t1 t2 =
                 setUniform s "depthV" v
              joinMap (traverse_ (liftIO . drawSectorGeometry))
                      (view sectors)
-        satPass p n =
+        fullscreenQuad =
           do (src,dst) <- use id
              glFramebufferTexture2D GL_FRAMEBUFFER GL_COLOR_ATTACHMENT0 GL_TEXTURE_2D dst 0
-             setUniform p
-                        "jump"
-                        (2 ^ n :: GLint)
              glBindTexture GL_TEXTURE_2D src
              glClear (GL_COLOR_BUFFER_BIT .|. GL_DEPTH_BUFFER_BIT)
              glDrawArrays GL_TRIANGLES 0 3
              id %= swap
+        satPass p n =
+          do setUniform p
+                        "jump"
+                        (2 ^ n :: GLint)
+             fullscreenQuad
         computeSummedAreaTable =
           do glBindVertexArray =<< view nullVao
-             glDisable GL_BLEND
-             glDepthFunc GL_LEQUAL
-             p <- use satProgram
-             glUseProgram (unGLProgram p)
              glActiveTexture GL_TEXTURE0
-             setUniform p
-                        "pixelSize"
-                        (1.0 / fromIntegral shadowMapResolution :: GLfloat)
              (src,_) <- execStateT
-                          (do setUniform p
-                                         "basis"
-                                         (V2 1 0 :: V2 GLfloat)
-                              mapM_ (satPass p)
-                                    [0 .. satPasses]
-                              setUniform p
-                                         "basis"
-                                         (V2 0 1 :: V2 GLfloat)
-                              mapM_ (satPass p)
-                                    [0 .. satPasses])
+                          (do do glBindTexture GL_TEXTURE_2D =<<
+                                   use _1
+                                 glGenerateMipmap GL_TEXTURE_2D
+                                 do sp <- lift (use sceneShader)
+                                    do avg <- overPtr (glGetTexImage GL_TEXTURE_2D
+                                                                     9
+                                                                     GL_RGBA
+                                                                     GL_FLOAT .
+                                                       castPtr)
+                                       setUniform sp
+                                                  "mean"
+                                                  (avg :: V4 GLfloat)
+                              do p <- lift (use reduceByAverage)
+                                 glUseProgram (unGLProgram p)
+                              glTexParameteri GL_TEXTURE_2D
+                                              GL_TEXTURE_MIN_FILTER
+                                              GL_LINEAR_MIPMAP_LINEAR
+                              fullscreenQuad
+                              glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MIN_FILTER GL_LINEAR
+                              do p <- lift (use satProgram)
+                                 glUseProgram (unGLProgram p)
+                                 setUniform
+                                   p
+                                   "pixelSize"
+                                   (1.0 / fromIntegral shadowMapResolution :: GLfloat)
+                                 setUniform p
+                                            "basis"
+                                            (V2 1 0 :: V2 GLfloat)
+                                 mapM_ (satPass p)
+                                       [0 .. satPasses]
+                                 setUniform p
+                                            "basis"
+                                            (V2 0 1 :: V2 GLfloat)
+                                 mapM_ (satPass p)
+                                       [0 .. satPasses])
                           (t1,t2)
              return src
 

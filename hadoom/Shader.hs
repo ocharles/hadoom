@@ -86,6 +86,10 @@ instance Uniform (V2 GLfloat) where
   setUniformLoc loc (V2 x y) =
     glUniform2f loc x y
 
+instance Uniform (V4 GLfloat) where
+  setUniformLoc loc (V4 x y z w) =
+    glUniform4f loc x y z w
+
 instance Uniform GLint where
   setUniformLoc = glUniform1i
 

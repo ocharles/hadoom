@@ -17,6 +17,7 @@ uniform sampler2D tex;
 uniform sampler2D depthMap;
 uniform sampler2D nmap;
 subroutine uniform lightRoutine lightContribution;
+uniform vec4 mean;
 
 struct LightInfo {
   vec3 pos;
@@ -51,7 +52,7 @@ vec4 sampleSat(vec2 uv, float size) {
           - texture(depthMap, uv + size * vec2(0, pixel))
           + texture(depthMap, uv + size * vec2(pixel, pixel));
 
-  return sum / (size * size);
+  return (sum / (size * size)) + mean;
 }
 
 void main(void) {
@@ -87,7 +88,7 @@ float estimatePenumbraWidth(vec2 shadowCoords, float depth, float blockerDepth) 
 float esmDepthTest(vec2 uv, float depth, float filterWidth, out bool failed) {
   uv -= vec2(filterWidth);
 
-  float esm = sampleSat(uv, 2 * filterWidth * shadowMapSize);
+  float esm = sampleSat(uv, 2 * filterWidth * shadowMapSize).x;
   float esmTest = esm * exp(-c * (depth * depthBiasFactor));
   failed = esmTest >= 1 + esmEpsilon;
   return esmTest;

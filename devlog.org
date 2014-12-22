@@ -207,3 +207,21 @@ precision. Another option is to try the "distribute precision" hack from before,
 and to use two channels.
 
 Anyway, very happy that at long last - I'm finally at the first real goal. Exciting.
+
+
+* <2014-12-22 Mon>
+
+I've implemented the idea of reducing the image by the mean first, mostly with
+better results. I spent a while trying to figure out the best way to do it, in
+the end using =glGenerateMipmap= and sampling from the highest mipmap
+level. This is a clear idea, but took me a while to learn the practice to
+achieve this goal. I went down a small dead end while trying to perform a
+controlled experiment to sample the average texel value (with =glGetTexImage=),
+but failed to control the input texture.
+
+With that finished, I am correctly calculating a mean and offseting and the
+results are better, but they are still not really usable for large area
+lights. The moment the light size is increased, the scene rapidly becomes noise.
+
+I think I'm probably going to have to go with summed area tiles, or some other
+derivative scheme.
