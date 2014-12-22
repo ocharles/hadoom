@@ -39,13 +39,14 @@ layout(std140) uniform Light {
 const float minLight = 0.003;
 
 const float lightSize = 0.01;
-const float c = 80.0f;
+const float c = 10.0f;
 const float shadowMapSize = 512.0f;
 const float pixel = 1.0f / shadowMapSize;
 const float esmEpsilon = 0.001;
 const float depthBiasFactor = 1.2;
 
 vec4 sampleSat(vec2 uv, float size) {
+  size = max(size, 1);
   vec4 sum =
             textureLod(depthMap, uv, 0)
           - textureLod(depthMap, uv + size * vec2(pixel, 0), 0)

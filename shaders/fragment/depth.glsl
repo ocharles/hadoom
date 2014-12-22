@@ -5,7 +5,7 @@ layout(location = 0) out highp vec4 fragmentdepth;
 
 in vec3 wp;
 
-const float c = 80.0f;
+const float c = 10.0f;
 
 void main(){
   float near = 1.0f;
