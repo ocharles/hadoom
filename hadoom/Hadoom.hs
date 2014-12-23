@@ -235,8 +235,8 @@ renderLightDepthTexture l t1 t2 =
                             mkTransformation 0
                                              (negate (lightPos l)))
                    in do renderDepthTexture v
-                         computeSummedAreaTable
-                         return (v,t1)
+                         t' <- computeSummedAreaTable
+                         return (v,t')
                  Omni ->
                    return (distribute
                              (mkTransformation 0
@@ -261,54 +261,49 @@ renderLightDepthTexture l t1 t2 =
              glClear (GL_COLOR_BUFFER_BIT .|. GL_DEPTH_BUFFER_BIT)
              glDrawArrays GL_TRIANGLES 0 3
              id %= swap
-        satPass p n =
-          do setUniform p
-                        "jump"
-                        (2 ^ n :: GLint)
-             fullscreenQuad
+        satPasses =
+          do do p <- lift (use satProgram)
+                glUseProgram (unGLProgram p)
+                let satPass n =
+                      do setUniform p
+                                    "jump"
+                                    (2 ^ n :: GLint)
+                         fullscreenQuad
+                    satPasses =
+                      ceiling (logBase 2 (fromIntegral shadowMapResolution))
+                setUniform p
+                           "pixelSize"
+                           (1.0 / fromIntegral shadowMapResolution :: GLfloat)
+                forM_ [V2 1 0,V2 0 1] $
+                  \basis ->
+                    do setUniform p
+                                  "basis"
+                                  (basis :: V2 GLfloat)
+                       mapM_ satPass [0 .. satPasses]
         computeSummedAreaTable =
           do glBindVertexArray =<< view nullVao
              glActiveTexture GL_TEXTURE0
              (src,_) <- execStateT
-                          (do do glBindTexture GL_TEXTURE_2D =<<
-                                   use _1
-                                 glGenerateMipmap GL_TEXTURE_2D
-                                 do sp <- lift (use sceneShader)
-                                    do avg <- overPtr (glGetTexImage GL_TEXTURE_2D
-                                                                     9
-                                                                     GL_RGBA
-                                                                     GL_FLOAT .
-                                                       castPtr)
-                                       setUniform sp
-                                                  "mean"
-                                                  (avg :: V4 GLfloat)
-                              do p <- lift (use reduceByAverage)
-                                 glUseProgram (unGLProgram p)
-                              glTexParameteri GL_TEXTURE_2D
-                                              GL_TEXTURE_MIN_FILTER
-                                              GL_LINEAR_MIPMAP_LINEAR
-                              fullscreenQuad
-                              glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MIN_FILTER GL_LINEAR
-                              do p <- lift (use satProgram)
-                                 glUseProgram (unGLProgram p)
-                                 setUniform
-                                   p
-                                   "pixelSize"
-                                   (1.0 / fromIntegral shadowMapResolution :: GLfloat)
-                                 setUniform p
-                                            "basis"
-                                            (V2 1 0 :: V2 GLfloat)
-                                 mapM_ (satPass p)
-                                       [0 .. satPasses]
-                                 setUniform p
-                                            "basis"
-                                            (V2 0 1 :: V2 GLfloat)
-                                 mapM_ (satPass p)
-                                       [0 .. satPasses])
+                          (do sp <- lift (use sceneShader)
+                              determineAverage >>=
+                                setUniform sp "mean"
+                              subtractAverage
+                              satPasses)
                           (t1,t2)
              return src
-
-satPasses = ceiling (logBase 2 (fromIntegral shadowMapResolution))
+        determineAverage :: (MonadIO m, MonadState (GLuint, GLuint) m) => m (V4 GLfloat)
+        determineAverage =
+          do glBindTexture GL_TEXTURE_2D =<<
+               use _1
+             glGenerateMipmap GL_TEXTURE_2D
+             overPtr (glGetTexImage GL_TEXTURE_2D 9 GL_RGBA GL_FLOAT .
+                      castPtr)
+        subtractAverage =
+          do p <- lift (use reduceByAverage)
+             glUseProgram (unGLProgram p)
+             glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MIN_FILTER GL_LINEAR_MIPMAP_LINEAR
+             fullscreenQuad
+             glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MIN_FILTER GL_LINEAR
 
 --------------------------------------------------------------------------------
 renderFromCamera :: (MonadIO m, MonadReader r m, HasRenderData r, HasShaders s, MonadState s m)

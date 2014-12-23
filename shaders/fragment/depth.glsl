@@ -9,7 +9,7 @@ const float c = 10.0f;
 
 void main(){
   float near = 1.0f;
-  float far = 100.0f;
+  float far = 40.0f;
   float z = (length(wp - vec3(0, 2, 0)) - near) / (far - near);
 
   float scale = 1073741824; // 2 ^ 30

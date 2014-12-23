@@ -101,7 +101,7 @@ float spotlight() {
   if (theta >= spotlightParams.cosConeRadius) {
     vec3 shadowDiv = shadowCoords.xyz / shadowCoords.w;
     float near = 1.0f;
-    float far = 100.0f;
+    float far = 40.0f;
     float ourDepth = (length(wp - light.pos) - near) / (far - near);
 
     bool blocked;
