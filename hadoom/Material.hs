@@ -47,7 +47,7 @@ loadTexture path colorSpace =
               GL_TEXTURE_2D
               (floor (logBase 2 (fromIntegral (max width height))))
               (case colorSpace of
-                 SRGB -> GL_SRGB
+                 SRGB -> GL_SRGB8
                  Linear -> GL_RGB32F)
               width
               height
