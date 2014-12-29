@@ -15,6 +15,7 @@ import Data.Foldable
 import Data.Maybe
 import Data.Monoid
 import Data.TList
+import Data.Traversable (for)
 import Foreign
 import Foreign.C.Types
 import Graphics.GL
@@ -36,9 +37,19 @@ data CompiledSector =
                  ,csCeilingMat :: CompiledMaterial
                  ,csProperties :: SectorProperties}
 
+data WallSegment =
+  WallSegment {wsMat :: CompiledMaterial
+              ,wsRender :: IO ()}
+
+data CompiledWall =
+  CompiledWall { cwLower :: Maybe WallSegment
+               , cwUpper :: Maybe WallSegment
+               , cwMiddle :: Maybe WallSegment
+               }
+
 data GLInterpretation :: SceneElementType -> * where
   GLVertex :: V2 Float -> GLInterpretation TVertex
-  GLWall :: IO () -> GLInterpretation TWall
+  GLWall :: CompiledWall -> GLInterpretation TWall
   GLSector :: CompiledSector -> GLInterpretation TSector
   GLWorld :: [GLInterpretation TSector] -> [GLInterpretation TWall] -> GLInterpretation TWorld
   GLTexture :: GLTextureObject -> GLInterpretation TTexture
@@ -53,7 +64,20 @@ drawWorldTextured (GLWorld sectors walls) =
                      Material.activateMaterial csCeilingMat
                      csRenderCeiling)
                sectors
-     traverse_ (\(GLWall io) -> io) walls
+     traverse_ (\(GLWall CompiledWall{..}) ->
+                  do for_ cwLower
+                          (\WallSegment{..} ->
+                             do Material.activateMaterial wsMat
+                                wsRender)
+                     for_ cwUpper
+                          (\WallSegment{..} ->
+                             do Material.activateMaterial wsMat
+                                wsRender)
+                     for_ cwMiddle
+                          (\WallSegment{..} ->
+                             do Material.activateMaterial wsMat
+                                wsRender))
+               walls
 
 -- | Given a compiled world, render everything, but do not change materials.
 -- Used for prefilling the depth buffer, or rendering depth for light shadow
@@ -64,7 +88,11 @@ drawWorldGeometry (GLWorld sectors walls) =
                   do csRenderFloor
                      csRenderCeiling)
                sectors
-     traverse_ (\(GLWall io) -> io) walls
+     traverse_ (\(GLWall CompiledWall{..}) ->
+                  do for_ cwLower (\WallSegment{..} -> wsRender)
+                     for_ cwUpper (\WallSegment{..} -> wsRender)
+                     for_ cwMiddle (\WallSegment{..} -> wsRender))
+               walls
 
 -- | Compile a 'PWorld' into objects that can be used by OpenGL.
 compile :: PWorld l -> IO (GLInterpretation l)
@@ -89,7 +117,7 @@ compile (PWorld levelExpr) = go levelExpr
           do sectors <- traverse go mkSectors
              walls <- traverse go mkWalls
              return (GLWorld sectors walls)
-        go (Sector props mkVertices mkFloorMat mkCeilingMat mkWallMat) =
+        go (Sector props mkVertices mkFloorMat mkCeilingMat) =
           do
              -- Realise all vertices
              vertices <- map (\(GLVertex v) -> v) <$>
@@ -185,7 +213,7 @@ compile (PWorld levelExpr) = go levelExpr
                 ((\(GLMaterial m) -> m) <$>
                  go mkCeilingMat) <*>
                 pure props)
-        go (Wall mkV1 mkV2 mkFrontSector mkBackSector) =
+        go (Wall mkV1 mkV2 mkFrontSector mkBackSector mkMidMat mkUpperMat mkLowerMat) =
           do
              -- Allocate a vertex array object for this wall.
              vao <- overPtr (glGenVertexArrays 1)
@@ -286,17 +314,34 @@ compile (PWorld levelExpr) = go levelExpr
                                     sizeOfWall .
                                   castPtr))
              GL.configureVertexAttributes
-             return (GLWall (do glBindVertexArray vao
-                                when (not (drawUpper || drawLower))
-                                     (glDrawArrays GL_TRIANGLE_FAN 0 4) -- TODO
-                                when drawUpper (glDrawArrays GL_TRIANGLE_FAN 4 4)
-                                when drawLower
-                                     (glDrawArrays
-                                        GL_TRIANGLE_FAN
-                                        (if drawUpper
-                                            then 8
-                                            else 4)
-                                        4)))
+             GLWall <$>
+               (CompiledWall <$>
+                (for (backSector >> mkLowerMat)
+                     (\mkMat ->
+                        WallSegment <$>
+                        ((\(GLMaterial m) -> m) <$>
+                         go mkMat) <*>
+                        pure (do glBindVertexArray vao
+                                 glDrawArrays
+                                   GL_TRIANGLE_FAN
+                                   (if drawUpper
+                                       then 8
+                                       else 4)
+                                   4))) <*>
+                (for (backSector >> mkUpperMat)
+                     (\mkMat ->
+                        WallSegment <$>
+                        ((\(GLMaterial m) -> m) <$>
+                         go mkMat) <*>
+                        pure (do glBindVertexArray vao
+                                 glDrawArrays GL_TRIANGLE_FAN 4 4))) <*>
+                (for mkMidMat
+                     (\mkMat ->
+                        WallSegment <$>
+                        ((\(GLMaterial m) -> m) <$>
+                         go mkMat) <*>
+                        pure (do glBindVertexArray vao
+                                 glDrawArrays GL_TRIANGLE_FAN 0 4))))
 
 testWorld :: PWorld TWorld
 testWorld =
@@ -307,6 +352,8 @@ testWorld =
                                           (Just (Texture "RoughBlockWall-NormalMap.jpg")) :::
                     Hadoom.World.Material (Texture "tiles.png")
                                           (Just (Texture "tiles-normals.png")) :::
+                    Hadoom.World.Material (Texture "test-texture.jpg")
+                                          (Just (Texture "debug-normals.png")) :::
                     Vertex (V2 (-10)
                                (-10)) :::
                     Vertex (V2 (-2)
@@ -319,32 +366,30 @@ testWorld =
                     Vertex (V2 (-3)
                                (-40)) :::
                     TNil)
-                 (\(wt ::: ft ::: ct ::: v1 ::: v2 ::: v3 ::: v4 ::: v5 ::: v6 ::: v7 ::: v8 ::: _) ->
+                 (\(wt ::: ft ::: ct ::: lt ::: v1 ::: v2 ::: v3 ::: v4 ::: v5 ::: v6 ::: v7 ::: v8 ::: _) ->
                     letrec (\_ ->
                               Sector (SectorProperties (-3)
                                                        10)
                                      [v1,v2,v3,v4,v5,v6]
                                      ft
-                                     ct
-                                     wt :::
+                                     ct :::
                               Sector (SectorProperties (-2)
                                                        5)
                                      [v2,v8,v7,v3]
                                      ft
-                                     ct
-                                     wt :::
+                                     ct :::
                               TNil)
                            (\(s1 ::: s2 ::: TNil) ->
                               World [s1,s2]
-                                    [Wall v1 v2 s1 Nothing
-                                    ,Wall v2 v3 s1 (Just s2)
-                                    ,Wall v3 v4 s1 Nothing
-                                    ,Wall v4 v5 s1 Nothing
-                                    ,Wall v5 v6 s1 Nothing
-                                    ,Wall v6 v1 s1 Nothing
-                                    ,Wall v2 v8 s2 Nothing
-                                    ,Wall v8 v7 s2 Nothing
-                                    ,Wall v7 v3 s2 Nothing])))
+                                    [Wall v1 v2 s1 Nothing (Just wt) Nothing Nothing
+                                    ,Wall v2 v3 s1 (Just s2) Nothing (Just lt) (Just lt)
+                                    ,Wall v3 v4 s1 Nothing (Just wt) Nothing Nothing
+                                    ,Wall v4 v5 s1 Nothing (Just wt) Nothing Nothing
+                                    ,Wall v5 v6 s1 Nothing (Just wt) Nothing Nothing
+                                    ,Wall v6 v1 s1 Nothing (Just wt) Nothing Nothing
+                                    ,Wall v2 v8 s2 Nothing (Just wt) Nothing Nothing
+                                    ,Wall v8 v7 s2 Nothing (Just wt) Nothing Nothing
+                                    ,Wall v7 v3 s2 Nothing (Just wt) Nothing Nothing])))
 
 textureSize :: Float
 textureSize = 2.5

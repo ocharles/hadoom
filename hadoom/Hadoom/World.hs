@@ -41,6 +41,7 @@ data WorldExpr :: (SceneElementType -> *) -> SceneElementType -> * where
   Wall
     :: WorldExpr f TVertex -> WorldExpr f TVertex         -- Start and end vertices
     -> WorldExpr f TSector -> Maybe (WorldExpr f TSector) -- Front and (optional) back sector
+    -> Maybe (WorldExpr f TMaterial) -> Maybe (WorldExpr f TMaterial) -> Maybe (WorldExpr f TMaterial)
     -> WorldExpr f TWall
 
   -- | Sectors take some basic properties, a list of vertices, and their material
@@ -50,7 +51,6 @@ data WorldExpr :: (SceneElementType -> *) -> SceneElementType -> * where
     -> [WorldExpr f TVertex] -- vertices
     -> WorldExpr f TMaterial -- floor
     -> WorldExpr f TMaterial -- ceiling
-    -> WorldExpr f TMaterial -- walls
     -> WorldExpr f TSector
 
   -- | A material is the composition of a basic diffuse texture along with an
