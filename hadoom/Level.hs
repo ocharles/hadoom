@@ -3,25 +3,27 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
 module Level where
 
-import Control.Monad.Fix
 import Control.Applicative
-import Control.Lens hiding (Level)
+import Control.Lens hiding (Level, indices)
 import Control.Monad (when)
+import Control.Monad.Fix
 import Data.Foldable (for_, traverse_)
-import Data.Function (fix)
 import Data.Maybe
-import Foreign (nullPtr, sizeOf, with, castPtr, withArray, plusPtr)
+import Data.Monoid
+import Foreign (nullPtr, sizeOf, castPtr, withArray, plusPtr)
 import Foreign.C.Types
 import Graphics.GL
 import Linear
+import Material
+import Shader
 import Util
 import qualified Data.Vector as V
 import qualified Data.Vector.Storable as SV
 import qualified Sector
-import Shader
 
 data VertexId
 data WallId
@@ -37,11 +39,11 @@ data TList :: (k -> *) -> [k] -> * where
   (:::) :: f t -> TList f ts -> TList f (t ': ts)
 
 tmap :: (forall a. f a -> g a) -> TList f as -> TList g as
-tmap f (TNil) = TNil
+tmap _ TNil = TNil
 tmap f (x ::: xs) = f x ::: tmap f xs
 
 ttraverse :: Applicative i => (forall a. f a -> i (g a)) -> TList f xs -> i (TList g xs)
-ttraverse f TNil = pure TNil
+ttraverse _ TNil = pure TNil
 ttraverse f (x ::: xs) = (:::) <$> f x <*> ttraverse f xs
 
 data LevelExpr :: (* -> *) -> * -> * where
@@ -92,8 +94,23 @@ data SectorProperties =
 data GLInterpretation :: * -> * where
   GLVertex :: V2 Float -> GLInterpretation VertexId
   GLWall :: IO () -> GLInterpretation WallId
-  GLSector :: SectorProperties -> IO () -> GLInterpretation SectorId
-  GLWorld :: IO () -> GLInterpretation World
+  GLSector :: SectorProperties -> IO () -> Material.Material -> GLInterpretation SectorId
+  GLWorld :: [GLInterpretation SectorId] -> [GLInterpretation WallId] -> GLInterpretation World
+  GLTexture :: GLTextureObject -> GLInterpretation TextureId
+  GLMaterial :: Material.Material -> GLInterpretation MaterialId
+
+drawWorldTextured :: GLInterpretation World -> IO ()
+drawWorldTextured (GLWorld sectors walls) =
+  do traverse_ (\(GLSector _ io mat) ->
+                  do Material.activateMaterial mat
+                     io)
+               sectors
+     traverse_ (\(GLWall io) -> io) walls
+
+drawWorldGeometry :: GLInterpretation World -> IO ()
+drawWorldGeometry (GLWorld sectors walls) =
+  do traverse_ (\(GLSector _ io _) -> io) sectors
+     traverse_ (\(GLWall io) -> io) walls
 
 compile :: Level l -> IO (GLInterpretation l)
 compile (Level levelExpr) = do go levelExpr
@@ -103,12 +120,15 @@ compile (Level levelExpr) = do go levelExpr
              go (in_ bindings')
         go (Var x) = return x
         go (Vertex v) = return (GLVertex v)
+        go (Texture path) =
+          GLTexture <$> loadTexture path SRGB
+        go (Level.Material mkDiffuse mkNormals) = do
+          GLMaterial <$> (Material.Material <$> ((\(GLTexture t) -> t) <$> go mkDiffuse) <*> ((\(Just (GLTexture t)) -> t) <$> traverse go mkNormals))
         go (World mkSectors mkWalls) =
           do sectors <- traverse go mkSectors
              walls <- traverse go mkWalls
-             return (GLWorld (do traverse_ (\(GLSector _ io) -> io) sectors
-                                 traverse_ (\(GLWall io) -> io) walls))
-        go (Sector props mkVertices _ _ _) =
+             return (GLWorld sectors walls)
+        go (Sector props mkVertices mkMat _ _) =
           do
              -- Realise all vertices
              vertices <- map (\(GLVertex v) -> v) <$>
@@ -125,6 +145,17 @@ compile (Level levelExpr) = do go levelExpr
                        (realToFrac <$>
                         (V2 x y ^*
                          recip textureSize))
+                 ceilingVertices =
+                   floorVertices <&>
+                   \(Sector.Vertex p n t bn uv) ->
+                     Sector.Vertex
+                       (p & _y .~
+                        realToFrac (sectorCeiling props))
+                       (negate n)
+                       t
+                       bn
+                       uv
+                 allVertices = floorVertices <> ceilingVertices
              -- Allocate a vertex array object for the floor and ceiling
              vao <- overPtr (glGenVertexArrays 1)
              glBindVertexArray vao
@@ -135,35 +166,61 @@ compile (Level levelExpr) = do go levelExpr
                GL_ARRAY_BUFFER
                (fromIntegral
                   (sizeOf (undefined :: Sector.Vertex) *
-                   length mkVertices))
+                   length allVertices))
                nullPtr
                GL_STATIC_DRAW
-             withArray floorVertices
+             withArray allVertices
                        (glBufferSubData
                           GL_ARRAY_BUFFER
                           0
                           (fromIntegral
                              (sizeOf (undefined :: Sector.Vertex) *
-                              length mkVertices)) .
+                              length allVertices)) .
                         castPtr)
              configureVertexAttributes
              -- Build the element buffer
              let floorIndices :: V.Vector GLuint
-                 floorIndices = fromIntegral <$> Sector.triangulate (V.fromList vertices)
-                 iboSize = fromIntegral (sizeOf (0 :: GLuint) * V.length floorIndices)
+                 floorIndices =
+                   fromIntegral <$>
+                   Sector.triangulate (V.fromList vertices)
+                 ceilingIndices =
+                   let reverseTriangles v =
+                         case V.splitAt 3 v of
+                           (h,t)
+                             | V.length h == 3 ->
+                               V.fromList [h V.! 0,h V.! 2,h V.! 1] V.++
+                               reverseTriangles t
+                           _ -> mempty
+                   in V.map (+ (fromIntegral (length floorVertices)))
+                            (reverseTriangles floorIndices)
+                 indices = floorIndices <> ceilingIndices
+                 iboSize =
+                   fromIntegral
+                     (sizeOf (0 :: GLuint) *
+                      V.length indices)
              ibo <- overPtr (glGenBuffers 1)
              glBindBuffer GL_ELEMENT_ARRAY_BUFFER ibo
              glBufferData GL_ELEMENT_ARRAY_BUFFER iboSize nullPtr GL_STATIC_DRAW
              SV.unsafeWith
-               (V.convert floorIndices)
+               (V.convert indices)
                (glBufferSubData GL_ELEMENT_ARRAY_BUFFER 0 iboSize .
                 castPtr)
+             GLMaterial mat <- go mkMat
              return (GLSector props
                               (do glBindVertexArray vao
                                   glDrawElements GL_TRIANGLES
                                                  (fromIntegral (V.length floorIndices))
                                                  GL_UNSIGNED_INT
-                                                 nullPtr))
+                                                 nullPtr
+                                  glDrawElements
+                                    GL_TRIANGLES
+                                    (fromIntegral (V.length ceilingIndices))
+                                    GL_UNSIGNED_INT
+                                    (nullPtr `plusPtr`
+                                     fromIntegral
+                                       (sizeOf (0 :: GLuint) *
+                                        V.length floorIndices)))
+                              mat)
         go (Wall mkV1 mkV2 mkFrontSector mkBackSector) =
           do
              -- Allocate a vertex array object for this wall.
@@ -172,13 +229,13 @@ compile (Level levelExpr) = do go levelExpr
              -- Evaluate the start and end vertices, and the front and back sectors.
              GLVertex v1 <- go mkV1
              GLVertex v2 <- go mkV2
-             GLSector (SectorProperties frontFloor frontCeiling) _ <- go mkFrontSector
+             GLSector (SectorProperties frontFloor frontCeiling) _ _ <- go mkFrontSector
              backSector <- traverse go mkBackSector
              -- We only draw the lower- or upper-front segments of a wall if the
              -- back sector is visible.
              let (drawLower,drawUpper) =
                    fromMaybe (False,False)
-                             (do GLSector back _ <- backSector
+                             (do GLSector back _ _ <- backSector
                                  return (sectorFloor back > frontFloor
                                         ,sectorCeiling back < frontCeiling))
              -- Allocate a buffer for the vertex data.
@@ -212,15 +269,15 @@ compile (Level levelExpr) = do go levelExpr
                        ZipList [V3 (v1 ^. _x)
                                    bottom
                                    (v1 ^. _y)
-                               ,V3 (v1 ^. _x)
-                                   top
-                                   (v1 ^. _y)
+                               ,V3 (v2 ^. _x)
+                                   bottom
+                                   (v2 ^. _y)
                                ,V3 (v2 ^. _x)
                                    top
                                    (v2 ^. _y)
-                               ,V3 (v2 ^. _x)
-                                   bottom
-                                   (v2 ^. _y)]) <*>
+                               ,V3 (v1 ^. _x)
+                                   top
+                                   (v1 ^. _y)]) <*>
                       ZipList (repeat (normalize (case perp wallV of
                                                     V2 x y ->
                                                       realToFrac <$>
@@ -240,21 +297,21 @@ compile (Level levelExpr) = do go levelExpr
                         castPtr)
              -- Upload the upper-front wall segment, if necessary.
              for_ backSector $
-               \(GLSector (SectorProperties _ backCeiling) _) ->
+               \(GLSector (SectorProperties _ backCeiling) _ _) ->
                  when drawUpper
                       (withArray (mkVertices backCeiling frontCeiling)
                                  (glBufferSubData GL_ARRAY_BUFFER sizeOfWall sizeOfWall .
                                   castPtr))
              -- Upload the lower-front wall segment, if necessary.
              for_ backSector $
-               \(GLSector (SectorProperties backFloor _) _) ->
+               \(GLSector (SectorProperties backFloor _) _ _) ->
                  when drawLower
                       (withArray (mkVertices frontFloor backFloor)
-                                 (glBufferSubData GL_ARRAY_BUFFER sizeOfWall sizeOfWall .
+                                 (glBufferSubData GL_ARRAY_BUFFER (if drawUpper then 2 * sizeOfWall else sizeOfWall) sizeOfWall .
                                   castPtr))
              configureVertexAttributes
              return (GLWall (do glBindVertexArray vao
-                                glDrawArrays GL_TRIANGLE_FAN 0 4
+                                when (not (drawUpper || drawLower)) (glDrawArrays GL_TRIANGLE_FAN 0 4) -- TODO
                                 when drawUpper (glDrawArrays GL_TRIANGLE_FAN 4 4)
                                 when drawLower
                                      (glDrawArrays
@@ -311,58 +368,52 @@ configureVertexAttributes =
                            (nullPtr `plusPtr` uvOffset)
      glEnableVertexAttribArray uvAttribute
 
-
--- testLevel :: Level WallId
--- testLevel =
---   Level (Let (\_ ->
---                 Texture "diffuse.jpg" :::
---                 TNil)
---              (\(t ::: _) ->
---                 Let (\_ ->
---                        Material (Var t) Nothing :::
---                        TNil)
---                     (\(m ::: _) ->
---                        Let (\_ ->
---                               Vertex (V2 0 0) :::
---                               Vertex (V2 10 0) :::
---                               Vertex (V2 0 10) :::
---                               TNil)
---                            (\(v1 ::: v2 ::: v3 ::: _) ->
---                               Let (\_ ->
---                                      Sector (SectorProperties 0 200)
---                                             (Many [Var v1,Var v2,Var v3])
---                                             (Var m)
---                                             (Var m)
---                                             (Var m) :::
---                                      TNil)
---                                   (\(s1 ::: _) ->
---                                      Wall (Var v1)
---                                           (Var v2)
---                                           (Var s1)
---                                           Nothing)))))
+letrec :: (TList (LevelExpr f) ts -> TList (LevelExpr f) ts)
+       -> (TList (LevelExpr f) ts -> LevelExpr f t)
+       -> LevelExpr f t
+letrec es e =
+  Let (\xs -> es (tmap Var xs))
+      (\xs -> e (tmap Var xs))
 
 testWorld :: Level World
 testWorld =
-  Level (Let (\_ ->
-                Vertex (V2 (-10) 10) :::
-                Vertex (V2 (-10) (-10)) :::
-                Vertex (V2 10 (-10)) :::
-                Vertex (V2 10 10) :::
-                TNil)
-             (\(v1 ::: v2 ::: v3 ::: v4 ::: TNil) ->
-                (Let (\_ ->
-                        Sector (SectorProperties (-10) 10)
-                               [Var v1,Var v2,Var v3,Var v4]
-                               undefined
-                               undefined
-                               undefined :::
-                        TNil)
-                     (\(s ::: TNil) ->
-                        World [Var s]
-                              [Wall (Var v1) (Var v2) (Var s) Nothing
-                              ,Wall (Var v2) (Var v3) (Var s) Nothing
-                              ,Wall (Var v3) (Var v4) (Var s) Nothing
-                              ,Wall (Var v4) (Var v1) (Var s) Nothing]))))
+  Level (letrec (\_ ->
+                   Level.Material (Texture "stonework-diffuse.png") (Just (Texture "stonework-normals.png")) :::
+                   Vertex (V2 (-10) (-10)) :::
+                   Vertex (V2 (-2) (-10)) :::
+                   Vertex (V2 2 (-10)) :::
+                   Vertex (V2 10 (-10)) :::
+                   Vertex (V2 10 10) :::
+                   Vertex (V2 (-10) 10) :::
+                   Vertex (V2 3 (-40)) :::
+                   Vertex (V2 (-3) (-40)) :::
+                   TNil)
+                (\(m ::: v1 ::: v2 ::: v3 ::: v4 ::: v5 ::: v6 ::: v7 ::: v8 ::: _) ->
+                   letrec (\_ ->
+                             Sector (SectorProperties (-3)
+                                                      10)
+                                    [v1,v2,v3,v4,v5,v6]
+                                    m
+                                    m
+                                    m :::
+                             Sector (SectorProperties (-2)
+                                                      5)
+                                    [v2,v8,v7,v3]
+                                    m
+                                    m
+                                    m :::
+                             TNil)
+                          (\(s1 ::: s2 ::: TNil) ->
+                             World [s1,s2]
+                                   [Wall v1 v2 s1 Nothing
+                                   ,Wall v2 v3 s1 (Just s2)
+                                   ,Wall v3 v4 s1 Nothing
+                                   ,Wall v4 v5 s1 Nothing
+                                   ,Wall v5 v6 s1 Nothing
+                                   ,Wall v6 v1 s1 Nothing
+                                   ,Wall v2 v8 s2 Nothing
+                                   ,Wall v8 v7 s2 Nothing
+                                   ,Wall v7 v3 s2 Nothing])))
 
 textureSize :: Float
 textureSize = 2.5

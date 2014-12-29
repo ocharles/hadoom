@@ -12,7 +12,7 @@ module Hadoom where
 import Control.Applicative
 import Control.Exception (finally)
 import Control.Lens hiding (indices)
-import Control.Monad (forM, forM_, replicateM_, when)
+import Control.Monad (forM_, when)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Loops (unfoldM)
@@ -21,7 +21,6 @@ import Control.Monad.State (MonadState)
 import Control.Monad.Trans.Reader (runReaderT)
 import Control.Monad.Trans.State.Strict (evalStateT, execStateT)
 import Data.Distributive (distribute)
-import Data.Foldable (any, traverse_)
 import Data.Function (fix)
 import Data.Tuple (swap)
 import Data.Maybe (fromMaybe)
@@ -34,13 +33,9 @@ import Linear as L
 import Material
 import Physics
 import Prelude hiding (any, floor)
-import Sector
 import Shader
-import Unsafe.Coerce (unsafeCoerce)
 import Util
-import qualified Data.IntMap.Strict as IM
 import qualified Data.Vector as V
-import qualified Data.Vector.Storable as SV
 import qualified FRP
 import qualified Quine.Debug as Quine
 import qualified SDL
@@ -50,37 +45,10 @@ import qualified Level as NewLevelDef
 screenWidth, screenHeight :: GLsizei
 (screenWidth,screenHeight) = (800,600)
 
-aCol :: V.Vector (V2 CFloat)
-aCol =
-  [V2 (-0.3)
-      (-0.3)
-  ,V2 (-0.3) 0.3
-  ,V2 0.3 0.3
-  ,V2 0.3 (-0.3)]
-
-col1, col2, col3, col4 :: V.Vector (V2 CFloat)
-col1 = V.map (+ V2 2.5 2.5) aCol
-col2 = V.map (+ V2 2.5 (-2.5)) aCol
-col3 = V.map (+ V2 (-2.5) 2.5) aCol
-col4 =
-  V.map (+ V2 (-2.5)
-              (-2.5))
-        aCol
-
-room :: V.Vector (V2 CFloat)
-room =
-  V.foldl' (flip makeSimple)
-           [V2 (-25)
-               (-25)
-           ,V2 25 (-25)
-           ,V2 25 25
-           ,V2 (-25) 25]
-           [] --col1] -- ,col2,col3,col4]
-
 --------------------------------------------------------------------------------
 data RenderData =
   RenderData {_lightFBO :: GLuint
-             ,_sectors :: [Sector]
+             ,_world :: NewLevelDef.GLInterpretation NewLevelDef.World
              ,_lightTextures :: V.Vector (GLTextureObject,GLTextureObject)
              ,_nullVao :: GLuint
              }
@@ -101,19 +69,16 @@ data Shaders = Shaders
 makeClassy ''Shaders
 
 --------------------------------------------------------------------------------
-hadoom :: [Sector] -> SDL.Window -> IO b
-hadoom sectors win =
+hadoom :: SDL.Window -> IO b
+hadoom win =
   do tstart <- getCurrentTime
      static <- loadRenderData
-     NewLevelDef.GLWorld drawWorld <- NewLevelDef.compile NewLevelDef.testWorld
      runReaderT
        (do initialShaders <- liftIO reloadShaders
-           evalStateT
-             (fix (step drawWorld)
-                  (scene,tstart))
-             initialShaders)
+           evalStateT (fix step (scene,tstart))
+                      initialShaders)
        static
-  where step drawWorld again (w,currentTime) =
+  where step again (w,currentTime) =
           do newTime <- liftIO getCurrentTime
              let frameTime = newTime `diffUTCTime` currentTime
              events <- liftIO (unfoldM SDL.pollEvent)
@@ -131,12 +96,8 @@ hadoom sectors win =
                   (distribute
                      (fromMaybe (error "Failed to invert view matrix")
                                 (inv44 viewMat)))
-             -- lights' <- renderLightDepthTextures (V.take 10 lights)
-             -- renderFromCamera lights'
-             do glBindFramebuffer GL_FRAMEBUFFER 0
-                glViewport 0 0 screenWidth screenHeight
-                glClear (GL_COLOR_BUFFER_BIT .|. GL_DEPTH_BUFFER_BIT)
-                liftIO drawWorld
+             lights' <- renderLightDepthTextures (V.take 10 lights)
+             renderFromCamera lights'
              SDL.glSwapWindow win
              again (w',newTime)
         reloadShadersRequested = (`hasScancode` SDL.ScancodeR)
@@ -144,13 +105,13 @@ hadoom sectors win =
           do liftIO (putStrLn "Loading shaders")
              shaderProg <- createShaderProgram "shaders/vertex/projection-model.glsl"
                                                "shaders/fragment/solid-white.glsl"
-             shadowShader <- createShaderProgram "shaders/vertex/shadow.glsl"
-                                                 "shaders/fragment/depth.glsl"
+             shadowShader_ <- createShaderProgram "shaders/vertex/shadow.glsl"
+                                                  "shaders/fragment/depth.glsl"
              satShader <- createShaderProgram "shaders/vertex/sat.glsl" "shaders/fragment/sat.glsl"
              reduce <- createShaderProgram "shaders/vertex/sat.glsl"
                                            "shaders/fragment/subtract-mean.glsl"
-             spotlightIndex <- getSubroutineIndex shaderProg "spotlight"
-             pointIndex <- getSubroutineIndex shaderProg "omni"
+             spotlightIndex_ <- getSubroutineIndex shaderProg "spotlight"
+             pointIndex_ <- getSubroutineIndex shaderProg "omni"
              do let perspectiveMat :: M44 GLfloat
                     perspectiveMat =
                       perspective (pi / 180 * 40)
@@ -165,7 +126,7 @@ hadoom sectors win =
                                   100
                 setUniform shaderProg "projection" perspectiveMat
                 setUniform shaderProg "lightProjection" lPerspective
-                setUniform shadowShader "depthP" lPerspective
+                setUniform shadowShader_ "depthP" lPerspective
                 let bias =
                       V4 (V4 0.5 0 0 0)
                          (V4 0 0.5 0 0)
@@ -183,33 +144,24 @@ hadoom sectors win =
                 setUniform shaderProg
                            "nmap"
                            (2 :: Int32)
-             lightsUBO <- overPtr (glGenBuffers 1)
-             glBindBuffer GL_UNIFORM_BUFFER lightsUBO
+             lightsUBO_ <- overPtr (glGenBuffers 1)
+             glBindBuffer GL_UNIFORM_BUFFER lightsUBO_
              blockIndex <- getUniformBlockIndex shaderProg "Light"
-             glBindBufferBase GL_UNIFORM_BUFFER blockIndex lightsUBO
+             glBindBufferBase GL_UNIFORM_BUFFER blockIndex lightsUBO_
              return Shaders {_sceneShader = shaderProg
-                            ,_shadowShader = shadowShader
+                            ,_shadowShader = shadowShader_
                             ,_satProgram = satShader
-                            ,_spotlightIndex = spotlightIndex
-                            ,_pointIndex = pointIndex
-                            ,_lightsUBO = lightsUBO
+                            ,_spotlightIndex = spotlightIndex_
+                            ,_pointIndex = pointIndex_
+                            ,_lightsUBO = lightsUBO_
                             ,_reduceByAverage = reduce}
         loadRenderData =
-          do vertBlur <- createShaderProgram "shaders/vertex/gauss-vert.glsl"
-                                             "shaders/fragment/gauss.glsl"
-             horizBlur <- createShaderProgram "shaders/vertex/gauss-horiz.glsl"
-                                              "shaders/fragment/gauss.glsl"
-             lightFBO <- unGLFramebufferObject <$> genLightFramebufferObject
-             lightTextures <- V.replicateM
-                                10
-                                ((,) <$> genLightDepthMap <*> genLightDepthMap)
-             nullVaoId <- overPtr (glGenVertexArrays 1)
-             let static =
-                   RenderData {_sectors = sectors
-                              ,_lightFBO = lightFBO
-                              ,_lightTextures = lightTextures
-                              ,_nullVao = nullVaoId}
-             return static
+          RenderData <$>
+          (unGLFramebufferObject <$> genLightFramebufferObject) <*>
+          NewLevelDef.compile NewLevelDef.testWorld <*>
+          V.replicateM 10
+                       ((,) <$> genLightDepthMap <*> genLightDepthMap) <*>
+          overPtr (glGenVertexArrays 1)
 
 --------------------------------------------------------------------------------
 renderLightDepthTextures :: (Applicative m,MonadIO m,MonadReader r m,HasRenderData r,HasShaders s,MonadState s m)
@@ -239,7 +191,7 @@ renderLightDepthTexture :: (Applicative m,MonadIO m,MonadReader r m,HasRenderDat
 renderLightDepthTexture l t1 t2 =
   do glEnable GL_DEPTH_TEST
      (v,t') <- case lightShape l of
-                 Spotlight dir _ _ rotationMatrix ->
+                 Spotlight _ _ _ rotationMatrix ->
                    let v =
                          distribute
                            (m33_to_m44 rotationMatrix !*!
@@ -263,8 +215,7 @@ renderLightDepthTexture l t1 t2 =
              glClearColor 0 0 0 0
              do s <- use shadowShader
                 setUniform s "depthV" v
-             joinMap (traverse_ (liftIO . drawSectorGeometry))
-                     (view sectors)
+             liftIO . NewLevelDef.drawWorldGeometry =<< view world
         fullscreenQuad =
           do (src,dst) <- use id
              glFramebufferTexture2D GL_FRAMEBUFFER GL_COLOR_ATTACHMENT0 GL_TEXTURE_2D dst 0
@@ -275,22 +226,22 @@ renderLightDepthTexture l t1 t2 =
         satPasses =
           do do p <- lift (use satProgram)
                 glUseProgram (unGLProgram p)
-                let satPass n =
+                let satPass i =
                       do setUniform p
                                     "jump"
-                                    (2 ^ n :: GLint)
+                                    (2 ^ i :: GLint)
                          fullscreenQuad
-                    satPasses =
-                      ceiling (logBase 2 (fromIntegral shadowMapResolution))
+                    n =
+                      ceiling (logBase 2 (fromIntegral shadowMapResolution) :: Float)
                 setUniform p
                            "pixelSize"
                            (1.0 / fromIntegral shadowMapResolution :: GLfloat)
                 forM_ [V2 1 0,V2 0 1] $
-                  \basis ->
+                  \satBasis ->
                     do setUniform p
                                   "basis"
-                                  (basis :: V2 GLfloat)
-                       mapM_ satPass [0 .. satPasses]
+                                  (satBasis :: V2 GLfloat)
+                       mapM_ satPass [0 .. n :: Int]
         computeSummedAreaTable =
           do glBindVertexArray =<< view nullVao
              glActiveTexture GL_TEXTURE0
@@ -336,7 +287,7 @@ renderFromCamera lights =
         renderDepthBuffer =
           do glClear GL_DEPTH_BUFFER_BIT
              glUseProgram . unGLProgram =<< use sceneShader
-             liftIO . mapM_ drawSectorGeometry =<< view sectors
+             liftIO . NewLevelDef.drawWorldGeometry =<< view world
         prepareMultipassRendering =
           do glEnable GL_BLEND
              glBlendFunc GL_ONE GL_ONE
@@ -360,7 +311,7 @@ renderFromCamera lights =
                                              (fromIntegral (sizeOf (undefined :: Light)))
                                              (castPtr ptr)
                                              GL_STREAM_DRAW))
-             liftIO . mapM_ drawSectorTextured =<< view sectors
+             liftIO . NewLevelDef.drawWorldTextured =<< view world
 
 --------------------------------------------------------------------------------
 withHadoom :: (SDL.Window -> IO b) -> IO b
@@ -384,91 +335,8 @@ withHadoom m =
      m win `finally` SDL.destroyRenderer renderer
 
 --------------------------------------------------------------------------------
-testHadoom :: [(Double,Double)] -> FilePath -> IO ()
-testHadoom vertices wallTexture =
-  withHadoom
-    (\w ->
-       do test <- Material <$>
-                  loadTexture wallTexture SRGB <*>
-                  loadTexture "flat.jpg" Linear
-          let x =
-                IM.fromList
-                  (zip [0 ..]
-                       (map (\(vx,vy) ->
-                               realToFrac <$>
-                               V2 (vx * 10)
-                                  (vy * 10))
-                            vertices))
-          print x
-          sector <- buildSector
-                      Blueprint {blueprintVertices = x
-                                ,blueprintWalls =
-                                   V.fromList
-                                     (let i =
-                                            [0 .. length vertices - 1]
-                                      in zip i (tail i ++ i))
-                                ,blueprintFloor = 0
-                                ,blueprintCeiling = 3
-                                ,blueprintFloorMaterial = test
-                                ,blueprintCeilingMaterial = test
-                                ,blueprintWallMaterial = test}
-          hadoom [sector] w)
-
---------------------------------------------------------------------------------
 playHadoom :: IO ()
-playHadoom =
-  withHadoom
-    (\w ->
-       do wall1 <- Material <$>
-                   loadTexture "stonework-diffuse.png" SRGB <*>
-                   loadTexture "stonework-normals.png" Linear
-          ceiling <- Material <$>
-                     loadTexture "CrustyConcrete-ColorMap.jpg" SRGB <*>
-                     loadTexture "CrustyConcrete-NormalMap.jpg" Linear
-          floor <- Material <$>
-                   loadTexture "tiles.png" SRGB <*>
-                   loadTexture "tiles-normals.png" Linear
-          sectorLargeRoom <- buildSector
-                               Blueprint {blueprintVertices =
-                                            IM.fromList
-                                              (zip [0 ..]
-                                                   (V.toList room))
-                                         ,blueprintWalls =
-                                            --[(0,1),(13,14),(14,27),(27,0)]
-                                            [(0, 1), (1, 2), (2, 3), (3, 0)]
-                                             --[]
-                                         ,blueprintFloor = 0
-                                         ,blueprintCeiling = 3
-                                         ,blueprintFloorMaterial = floor
-                                         ,blueprintCeilingMaterial = ceiling
-                                         ,blueprintWallMaterial = wall1}
-          [sectorCol1,sectorCol2,sectorCol3,sectorCol4] <- forM [col1
-                                                                ,col2
-                                                                ,col3
-                                                                ,col4]
-                                                                (\col ->
-                                                                   buildSector
-                                                                     Blueprint {blueprintVertices =
-                                                                                  IM.fromList
-                                                                                    (zip [0 ..]
-                                                                                         (V.toList col))
-                                                                               ,blueprintWalls =
-                                                                                  [(0
-                                                                                   ,1)
-                                                                                  ,(1
-                                                                                   ,2)
-                                                                                  ,(2
-                                                                                   ,3)
-                                                                                  ,(3
-                                                                                   ,0)]
-                                                                               ,blueprintFloor =
-                                                                                  (-2)
-                                                                               ,blueprintCeiling = 3
-                                                                               ,blueprintFloorMaterial = floor
-                                                                               ,blueprintCeilingMaterial = ceiling
-                                                                               ,blueprintWallMaterial = wall1})
-          --hadoom [sectorCol1,sectorCol2,sectorCol3,sectorCol4,sectorLargeRoom] w)
-          hadoom [sectorLargeRoom, sectorCol2] w)
+playHadoom = withHadoom hadoom
 
 --------------------------------------------------------------------------------
 joinMap :: Monad m => (a -> m b) -> m a -> m b

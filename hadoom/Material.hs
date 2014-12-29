@@ -45,7 +45,8 @@ loadTexture path colorSpace =
                   fromIntegral (JP.dynamicMap JP.imageHeight dimg)
             glTexStorage2D
               GL_TEXTURE_2D
-              (floor (logBase 2 (fromIntegral (max width height))))
+              (floor (logBase (2 :: Float)
+                              (fromIntegral (max width height))))
               (case colorSpace of
                  SRGB -> GL_SRGB8
                  Linear -> GL_RGB32F)

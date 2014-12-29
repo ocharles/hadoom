@@ -25,6 +25,7 @@ data Scene =
 lightDir :: CFloat -> V3 CFloat
 lightDir theta =
   case inv33 (fromQuaternion (axisAngle (V3 0 1 0) theta)) of
+    Nothing -> error "lightDir: Unable to invert rotation matrix (the impossible happened)"
     Just m ->
       m !*
       V3 0 0 (-1) :: V3 CFloat
@@ -37,12 +38,12 @@ scene =
      [Light (V3 0 2 0)
             (V3 1 1 1)
             50
-            (Spotlight (lightDir (realToFrac (pi / 4)))
+            (Spotlight (lightDir (realToFrac (pi / 4 :: Float)))
                        0.8
                        0.1
                        (fromQuaternion
                           (axisAngle (V3 0 1 0)
-                                     (realToFrac (pi / 4)))))
+                                     (realToFrac (pi / 4 :: Float)))))
      ,Light (V3 0 2 0)
             (V3 1 1 1)
             350
@@ -52,15 +53,10 @@ scene =
                        (fromQuaternion
                           (axisAngle (V3 0 1 0)
                                      (realToFrac (-t)))))
-     ,Light (V3 0 2 3) 1 3 Omni
-     ,Light (V3 (-3) 2 0) 1 3 Omni
-     ,Light (V3 3 2 0) 1 3 Omni
-     ,Light (V3 0 2 (-3)) 1 3 Omni
-            ])
-     -- ,Light (V3 0 2 0)
-     --        (V3 0.5 0.5 1)
-     --        10
-     --        Omni])
+     ,Light (V3 0 2 3) 1 30 Omni
+     ,Light (V3 (-3) 2 0) 1 30 Omni
+     ,Light (V3 3 2 0) 1 30 Omni
+     ,Light (V3 0 2 (-3)) 1 30 Omni])
 
 worldCamera :: FRP.Wire Identity [SDL.Event] (M44 CFloat)
 worldCamera =

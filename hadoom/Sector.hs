@@ -409,6 +409,7 @@ buildSector Blueprint{..} =
                     (castPtr indicesPtr)
                     GL_STATIC_DRAW)
 
+textureSize :: CFloat
 textureSize = 2.5
 
 drawSectorTextured :: Sector -> IO ()
