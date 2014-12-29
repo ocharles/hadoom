@@ -55,9 +55,7 @@ drawWorldGeometry (GLWorld sectors walls) =
 compile :: PWorld l -> IO (GLInterpretation l)
 compile (PWorld levelExpr) = go levelExpr
   where go :: WorldExpr GLInterpretation t -> IO (GLInterpretation t)
-        go (Let bindings in_) =
-          do bindings' <- mfix (ttraverse go . bindings)
-             go (in_ bindings')
+        go (Let bindings in_) = go . in_ =<< mfix (ttraverse go . bindings)
         go (Var x) = return x
         go (Vertex v) = return (GLVertex v)
         go (Texture path) =

@@ -1,4 +1,3 @@
-{-# LANGUAGE Arrows #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
@@ -10,7 +9,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 module Hadoom where
 
-import Control.Applicative
+import Control.Wire hiding (when)
 import Control.Exception (finally)
 import Control.Lens hiding (indices)
 import Control.Monad (forM_, when)
@@ -25,7 +24,6 @@ import Data.Distributive (distribute)
 import Data.Function (fix)
 import Data.Tuple (swap)
 import Data.Maybe (fromMaybe)
-import Data.Time (getCurrentTime, diffUTCTime)
 import Foreign
 import Foreign.C
 import Graphics.GL
@@ -33,11 +31,10 @@ import Light
 import Linear as L
 import Material
 import Physics
-import Prelude hiding (any, floor)
+import Prelude hiding (any, floor, (.), id)
 import Shader
 import Util
 import qualified Data.Vector as V
-import qualified FRP
 import qualified Quine.Debug as Quine
 import qualified SDL
 
@@ -73,24 +70,24 @@ makeClassy ''Shaders
 --------------------------------------------------------------------------------
 hadoom :: SDL.Window -> IO b
 hadoom win =
-  do tstart <- getCurrentTime
-     static <- loadRenderData
+  do static <- loadRenderData
      runReaderT
        (do initialShaders <- liftIO reloadShaders
-           evalStateT (fix step (scene,tstart))
+           evalStateT (fix step (scene,clockSession_))
                       initialShaders)
        static
-  where step again (w,currentTime) =
-          do newTime <- liftIO getCurrentTime
-             let frameTime = newTime `diffUTCTime` currentTime
+  where step again (w,sess) =
+          do (delta,s') <- stepSession sess
              events <- liftIO (unfoldM SDL.pollEvent)
              when (reloadShadersRequested events)
                   (shaders <~ liftIO reloadShaders)
-             let (Scene viewMat lights,w') =
-                   runIdentity
-                     (FRP.stepWire w
-                                   (realToFrac frameTime)
-                                   events)
+             let (out,w') =
+                   runIdentity (stepWire w delta (Right events))
+             let (Scene viewMat lights) =
+                   case out of
+                     Right x -> x
+                     Left () ->
+                       error "Unpossible"
              do s <- use sceneShader
                 setUniform
                   s
@@ -101,7 +98,7 @@ hadoom win =
              lights' <- renderLightDepthTextures (V.take 10 lights)
              renderFromCamera lights'
              SDL.glSwapWindow win
-             again (w',newTime)
+             again (w',s')
         reloadShadersRequested = (`hasScancode` SDL.ScancodeR)
         reloadShaders =
           do liftIO (putStrLn "Loading shaders")

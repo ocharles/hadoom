@@ -1,30 +1,32 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ViewPatterns #-}
-module Camera (Camera(..), camera, cameraQuat, cameraForward) where
+module Hadoom.Camera (Camera(..), camera, cameraQuat, cameraForward) where
 
-import Control.Arrow
+import Data.Profunctor
 import Control.Applicative
 import Control.Category
+import FRP.Netwire.Move (integral)
 import Control.Lens (alaf)
+import Control.Wire.Profunctor ()
 import Data.Foldable
-import Data.Functor.Identity
 import Data.Monoid
 import Linear
 import Prelude hiding ((.), id)
-import qualified FRP
 import qualified SDL
+
+import Control.Wire
 
 data Camera a =
   Camera {cameraPitch :: a
          ,cameraYaw :: a}
 
 -- | A camera in its own model space.
-camera :: (Fractional a) => FRP.Wire Identity [SDL.Event] (Camera a)
+camera :: (Foldable f, Fractional a, HasTime t s, Monad m) => Wire s e m (f SDL.Event) (Camera a)
 camera =
-  arr (\(V2 (negate -> cameraYaw) (negate -> cameraPitch)) ->
-         Camera {..}) .
-  FRP.integral .
-  arr (alaf Sum foldMap (mouseMotion . SDL.eventPayload))
+  dimap (alaf Sum foldMap (mouseMotion . SDL.eventPayload))
+        (\(V2 (negate -> cameraYaw) (negate -> cameraPitch)) ->
+           Camera {..})
+        (integral 0)
   where mouseMotion ev =
           case ev of
             SDL.MouseMotionEvent{..} ->
