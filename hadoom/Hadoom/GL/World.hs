@@ -34,6 +34,7 @@ data GLInterpretation :: SceneElementType -> * where
   GLTexture :: GLTextureObject -> GLInterpretation TTexture
   GLMaterial :: Material.Material -> GLInterpretation TMaterial
 
+-- | Given a compiled world, render the entire world with the correct materials.
 drawWorldTextured :: GLInterpretation TWorld -> IO ()
 drawWorldTextured (GLWorld sectors walls) =
   do traverse_ (\(GLSector _ io mat) ->
@@ -42,11 +43,15 @@ drawWorldTextured (GLWorld sectors walls) =
                sectors
      traverse_ (\(GLWall io) -> io) walls
 
+-- | Given a compiled world, render everything, but do not change materials.
+-- Used for prefilling the depth buffer, or rendering depth for light shadow
+-- maps.
 drawWorldGeometry :: GLInterpretation TWorld -> IO ()
 drawWorldGeometry (GLWorld sectors walls) =
   do traverse_ (\(GLSector _ io _) -> io) sectors
      traverse_ (\(GLWall io) -> io) walls
 
+-- | Compile a 'PWorld' into objects that can be used by OpenGL.
 compile :: PWorld l -> IO (GLInterpretation l)
 compile (PWorld levelExpr) = go levelExpr
   where go :: WorldExpr GLInterpretation t -> IO (GLInterpretation t)
@@ -70,8 +75,7 @@ compile (PWorld levelExpr) = go levelExpr
              walls <- traverse go mkWalls
              return (GLWorld sectors walls)
         go (Sector props mkVertices mkMat _ _) =
-          do
-             -- Realise all vertices
+          do -- Realise all vertices
              vertices <- map (\(GLVertex v) -> v) <$>
                          traverse go mkVertices
              let floorVertices =
@@ -163,8 +167,7 @@ compile (PWorld levelExpr) = go levelExpr
                                         V.length floorIndices)))
                               mat)
         go (Wall mkV1 mkV2 mkFrontSector mkBackSector) =
-          do
-             -- Allocate a vertex array object for this wall.
+          do -- Allocate a vertex array object for this wall.
              vao <- overPtr (glGenVertexArrays 1)
              glBindVertexArray vao
              -- Evaluate the start and end vertices, and the front and back sectors.
