@@ -1,3 +1,4 @@
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE DataKinds #-}
@@ -26,10 +27,19 @@ import qualified Data.Vector as V
 import qualified Data.Vector.Storable as SV
 import qualified Hadoom.GL.Vertex as GL
 
+type CompiledMaterial = Material.Material
+
+data CompiledSector =
+  CompiledSector {csRenderFloor :: IO ()
+                 ,csRenderCeiling :: IO ()
+                 ,csFloorMat :: CompiledMaterial
+                 ,csCeilingMat :: CompiledMaterial
+                 ,csProperties :: SectorProperties}
+
 data GLInterpretation :: SceneElementType -> * where
   GLVertex :: V2 Float -> GLInterpretation TVertex
   GLWall :: IO () -> GLInterpretation TWall
-  GLSector :: SectorProperties -> IO () -> Material.Material -> GLInterpretation TSector
+  GLSector :: CompiledSector -> GLInterpretation TSector
   GLWorld :: [GLInterpretation TSector] -> [GLInterpretation TWall] -> GLInterpretation TWorld
   GLTexture :: GLTextureObject -> GLInterpretation TTexture
   GLMaterial :: Material.Material -> GLInterpretation TMaterial
@@ -37,9 +47,11 @@ data GLInterpretation :: SceneElementType -> * where
 -- | Given a compiled world, render the entire world with the correct materials.
 drawWorldTextured :: GLInterpretation TWorld -> IO ()
 drawWorldTextured (GLWorld sectors walls) =
-  do traverse_ (\(GLSector _ io mat) ->
-                  do Material.activateMaterial mat
-                     io)
+  do traverse_ (\(GLSector CompiledSector{..}) ->
+                  do Material.activateMaterial csFloorMat
+                     csRenderFloor
+                     Material.activateMaterial csCeilingMat
+                     csRenderCeiling)
                sectors
      traverse_ (\(GLWall io) -> io) walls
 
@@ -48,14 +60,19 @@ drawWorldTextured (GLWorld sectors walls) =
 -- maps.
 drawWorldGeometry :: GLInterpretation TWorld -> IO ()
 drawWorldGeometry (GLWorld sectors walls) =
-  do traverse_ (\(GLSector _ io _) -> io) sectors
+  do traverse_ (\(GLSector CompiledSector{..}) ->
+                  do csRenderFloor
+                     csRenderCeiling)
+               sectors
      traverse_ (\(GLWall io) -> io) walls
 
 -- | Compile a 'PWorld' into objects that can be used by OpenGL.
 compile :: PWorld l -> IO (GLInterpretation l)
 compile (PWorld levelExpr) = go levelExpr
   where go :: WorldExpr GLInterpretation t -> IO (GLInterpretation t)
-        go (Let bindings in_) = go . in_ =<< mfix (ttraverse go . bindings)
+        go (Let bindings in_) =
+          go . in_ =<<
+          mfix (ttraverse go . bindings)
         go (Var x) = return x
         go (Vertex v) = return (GLVertex v)
         go (Texture path) =
@@ -72,32 +89,31 @@ compile (PWorld levelExpr) = go levelExpr
           do sectors <- traverse go mkSectors
              walls <- traverse go mkWalls
              return (GLWorld sectors walls)
-        go (Sector props mkVertices mkMat _ _) =
-          do -- Realise all vertices
+        go (Sector props mkVertices mkFloorMat mkCeilingMat mkWallMat) =
+          do
+             -- Realise all vertices
              vertices <- map (\(GLVertex v) -> v) <$>
                          traverse go mkVertices
              let floorVertices =
                    vertices <&>
                    \(V2 x y) ->
-                     GL.Vertex
-                       (realToFrac <$>
-                        V3 x (sectorFloor props) y)
-                       (V3 0 1 0)
-                       (V3 1 0 0)
-                       (V3 0 0 (-1))
-                       (realToFrac <$>
-                        (V2 x y ^*
-                         recip textureSize))
+                     GL.Vertex (realToFrac <$>
+                                V3 x (sectorFloor props) y)
+                               (V3 0 1 0)
+                               (V3 1 0 0)
+                               (V3 0 0 (-1))
+                               (realToFrac <$>
+                                (V2 x y ^*
+                                 recip textureSize))
                  ceilingVertices =
                    floorVertices <&>
                    \(GL.Vertex p n t bn uv) ->
-                     GL.Vertex
-                       (p & _y .~
-                        realToFrac (sectorCeiling props))
-                       (negate n)
-                       t
-                       bn
-                       uv
+                     GL.Vertex (p & _y .~
+                                realToFrac (sectorCeiling props))
+                               (negate n)
+                               t
+                               bn
+                               uv
                  allVertices = floorVertices <> ceilingVertices
              -- Allocate a vertex array object for the floor and ceiling
              vao <- overPtr (glGenVertexArrays 1)
@@ -148,38 +164,46 @@ compile (PWorld levelExpr) = go levelExpr
                (V.convert indices)
                (glBufferSubData GL_ELEMENT_ARRAY_BUFFER 0 iboSize .
                 castPtr)
-             GLMaterial mat <- go mkMat
-             return (GLSector props
-                              (do glBindVertexArray vao
-                                  glDrawElements GL_TRIANGLES
-                                                 (fromIntegral (V.length floorIndices))
-                                                 GL_UNSIGNED_INT
-                                                 nullPtr
-                                  glDrawElements
-                                    GL_TRIANGLES
-                                    (fromIntegral (V.length ceilingIndices))
-                                    GL_UNSIGNED_INT
-                                    (nullPtr `plusPtr`
-                                     fromIntegral
-                                       (sizeOf (0 :: GLuint) *
-                                        V.length floorIndices)))
-                              mat)
+             GLSector <$>
+               (CompiledSector
+                  (do glBindVertexArray vao
+                      glDrawElements GL_TRIANGLES
+                                     (fromIntegral (V.length floorIndices))
+                                     GL_UNSIGNED_INT
+                                     nullPtr)
+                  (do glBindVertexArray vao
+                      glDrawElements
+                        GL_TRIANGLES
+                        (fromIntegral (V.length ceilingIndices))
+                        GL_UNSIGNED_INT
+                        (nullPtr `plusPtr`
+                         fromIntegral
+                           (sizeOf (0 :: GLuint) *
+                            V.length floorIndices))) <$>
+                ((\(GLMaterial m) -> m) <$>
+                 go mkFloorMat) <*>
+                ((\(GLMaterial m) -> m) <$>
+                 go mkCeilingMat) <*>
+                pure props)
         go (Wall mkV1 mkV2 mkFrontSector mkBackSector) =
-          do -- Allocate a vertex array object for this wall.
+          do
+             -- Allocate a vertex array object for this wall.
              vao <- overPtr (glGenVertexArrays 1)
              glBindVertexArray vao
              -- Evaluate the start and end vertices, and the front and back sectors.
              GLVertex v1 <- go mkV1
              GLVertex v2 <- go mkV2
-             GLSector (SectorProperties frontFloor frontCeiling) _ _ <- go mkFrontSector
+             GLSector compiledSector <- go mkFrontSector
              backSector <- traverse go mkBackSector
              -- We only draw the lower- or upper-front segments of a wall if the
              -- back sector is visible.
              let (drawLower,drawUpper) =
                    fromMaybe (False,False)
-                             (do GLSector back _ _ <- backSector
-                                 return (sectorFloor back > frontFloor
-                                        ,sectorCeiling back < frontCeiling))
+                             (do GLSector back <- backSector
+                                 return (sectorFloor (csProperties back) >
+                                         sectorFloor (csProperties compiledSector)
+                                        ,sectorCeiling (csProperties back) <
+                                         sectorCeiling (csProperties compiledSector)))
              -- Allocate a buffer for the vertex data.
              vbo <- overPtr (glGenBuffers 1)
              glBindBuffer GL_ARRAY_BUFFER vbo
@@ -199,7 +223,9 @@ compile (PWorld levelExpr) = go levelExpr
              -- Upload vertex data.
              let wallV = v2 ^-^ v1
                  wallLen = norm wallV
-                 frontHeight = frontCeiling - frontFloor
+                 frontHeight =
+                   sectorCeiling (csProperties compiledSector) -
+                   sectorFloor (csProperties compiledSector)
                  u =
                    realToFrac (wallLen / textureSize) :: CFloat
                  v =
@@ -234,21 +260,24 @@ compile (PWorld levelExpr) = go levelExpr
              let sizeOfWall =
                    4 *
                    fromIntegral (sizeOf (undefined :: GL.Vertex))
-             withArray (mkVertices frontFloor frontCeiling)
+             withArray (mkVertices (sectorFloor (csProperties compiledSector))
+                                   (sectorCeiling (csProperties compiledSector)))
                        (glBufferSubData GL_ARRAY_BUFFER 0 sizeOfWall .
                         castPtr)
              -- Upload the upper-front wall segment, if necessary.
              for_ backSector $
-               \(GLSector (SectorProperties _ backCeiling) _ _) ->
+               \(GLSector back) ->
                  when drawUpper
-                      (withArray (mkVertices backCeiling frontCeiling)
+                      (withArray (mkVertices (sectorCeiling (csProperties back))
+                                             (sectorCeiling (csProperties compiledSector)))
                                  (glBufferSubData GL_ARRAY_BUFFER sizeOfWall sizeOfWall .
                                   castPtr))
              -- Upload the lower-front wall segment, if necessary.
              for_ backSector $
-               \(GLSector (SectorProperties backFloor _) _ _) ->
+               \(GLSector back) ->
                  when drawLower
-                      (withArray (mkVertices frontFloor backFloor)
+                      (withArray (mkVertices (sectorFloor (csProperties compiledSector))
+                                             (sectorFloor (csProperties back)))
                                  (glBufferSubData
                                     GL_ARRAY_BUFFER
                                     (if drawUpper
@@ -274,6 +303,10 @@ testWorld =
   PWorld (letrec (\_ ->
                     Hadoom.World.Material (Texture "stonework-diffuse.png")
                                           (Just (Texture "stonework-normals.png")) :::
+                    Hadoom.World.Material (Texture "RoughBlockWall-ColorMap.jpg")
+                                          (Just (Texture "RoughBlockWall-NormalMap.jpg")) :::
+                    Hadoom.World.Material (Texture "tiles.png")
+                                          (Just (Texture "tiles-normals.png")) :::
                     Vertex (V2 (-10)
                                (-10)) :::
                     Vertex (V2 (-2)
@@ -286,20 +319,20 @@ testWorld =
                     Vertex (V2 (-3)
                                (-40)) :::
                     TNil)
-                 (\(m ::: v1 ::: v2 ::: v3 ::: v4 ::: v5 ::: v6 ::: v7 ::: v8 ::: _) ->
+                 (\(wt ::: ft ::: ct ::: v1 ::: v2 ::: v3 ::: v4 ::: v5 ::: v6 ::: v7 ::: v8 ::: _) ->
                     letrec (\_ ->
                               Sector (SectorProperties (-3)
                                                        10)
                                      [v1,v2,v3,v4,v5,v6]
-                                     m
-                                     m
-                                     m :::
+                                     ft
+                                     ct
+                                     wt :::
                               Sector (SectorProperties (-2)
                                                        5)
                                      [v2,v8,v7,v3]
-                                     m
-                                     m
-                                     m :::
+                                     ft
+                                     ct
+                                     wt :::
                               TNil)
                            (\(s1 ::: s2 ::: TNil) ->
                               World [s1,s2]
