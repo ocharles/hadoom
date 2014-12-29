@@ -1,5 +1,6 @@
 module Light where
 
+import BasePrelude
 import Foreign (Storable(..), castPtr, nullPtr, plusPtr)
 import Foreign.C (CFloat)
 import Graphics.GL

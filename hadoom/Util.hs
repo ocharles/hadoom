@@ -1,6 +1,7 @@
 {-# LANGUAGE PatternSynonyms #-}
 module Util where
 
+import BasePrelude
 import Foreign
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Graphics.GL

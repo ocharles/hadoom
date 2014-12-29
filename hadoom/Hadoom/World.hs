@@ -9,8 +9,10 @@ module Hadoom.World
         PWorld(..), letrec)
        where
 
+import BasePrelude
 import Data.TList
 import Linear
+import System.IO
 
 -- | The set of types of scene elements in a world.
 data SceneElementType = TVertex | TWall | TSector | TMaterial | TTexture | TWorld

@@ -19,6 +19,7 @@ Library
   build-depends:
                     JuicyPixels
                 , base >=4.7 && <4.8
+                , base-prelude
                 , bytestring >= 0.10.4.0
                 , containers
                 , diagrams
@@ -36,6 +37,8 @@ Library
                 , time
                 , transformers
                 , vector
+  default-extensions:
+    NoImplicitPrelude
   exposed-modules:
     Control.Wire.Profunctor
     Data.TList

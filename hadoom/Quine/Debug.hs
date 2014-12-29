@@ -12,6 +12,7 @@ module Quine.Debug
   ( installDebugHook
   ) where
 
+import Prelude
 import Control.Monad.IO.Class
 import Foreign.C.String
 import Foreign.Ptr

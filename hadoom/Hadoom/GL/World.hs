@@ -7,15 +7,10 @@
 -- that can be viewed via OpenGL.
 module Hadoom.GL.World where
 
-import Control.Applicative
+import BasePrelude
 import Control.Lens hiding (indices)
-import Control.Monad
 import Control.Monad.Fix
-import Data.Foldable
-import Data.Maybe
-import Data.Monoid
 import Data.TList
-import Data.Traversable (for)
 import Foreign
 import Foreign.C.Types
 import Graphics.GL
