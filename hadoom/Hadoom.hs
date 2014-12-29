@@ -41,7 +41,8 @@ import qualified FRP
 import qualified Quine.Debug as Quine
 import qualified SDL
 
-import qualified Level as NewLevelDef
+import qualified Hadoom.GL.World as NewLevelDef
+import qualified Hadoom.World as NewLevelDef
 
 screenWidth, screenHeight :: GLsizei
 (screenWidth,screenHeight) = (800,600)
@@ -49,7 +50,7 @@ screenWidth, screenHeight :: GLsizei
 --------------------------------------------------------------------------------
 data RenderData =
   RenderData {_lightFBO :: GLuint
-             ,_world :: NewLevelDef.GLInterpretation NewLevelDef.WorldId
+             ,_world :: NewLevelDef.GLInterpretation NewLevelDef.TWorld
              ,_lightTextures :: V.Vector (GLTextureObject,GLTextureObject)
              ,_nullVao :: GLuint
              }

@@ -37,15 +37,17 @@ Library
                 , vector
   exposed-modules:
     Camera
-    Level
+    Data.TList
     FRP
-    Geometry
     Hadoom
+    Hadoom.GL.Vertex
+    Hadoom.GL.World
+    Hadoom.Geometry
+    Hadoom.World
     Light
     Material
     Physics
     Quine.Debug
-    Sector
     Shader
     Util
   other-modules:

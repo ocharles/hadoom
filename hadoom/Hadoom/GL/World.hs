@@ -1,100 +1,40 @@
-{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
-{-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeOperators #-}
-module Level where
+{-# LANGUAGE DataKinds #-}
+
+-- | This module allows a 'Hadoom.World.World' to be compiled into a description
+-- that can be viewed via OpenGL.
+module Hadoom.GL.World where
 
 import Control.Applicative
-import Control.Lens hiding (Level, indices)
-import Control.Monad (when)
+import Control.Lens hiding (indices)
+import Control.Monad
 import Control.Monad.Fix
-import Data.Foldable (for_, traverse_)
+import Data.Foldable
 import Data.Maybe
 import Data.Monoid
-import Foreign (nullPtr, sizeOf, castPtr, withArray, plusPtr)
+import Data.TList
+import Foreign
 import Foreign.C.Types
 import Graphics.GL
+import Hadoom.Geometry
+import Hadoom.World
 import Linear
 import Material
-import Shader
 import Util
 import qualified Data.Vector as V
 import qualified Data.Vector.Storable as SV
-import qualified Sector
+import qualified Hadoom.GL.Vertex as GL
 
-data SceneElementId = VertexId | WallId | SectorId | MaterialId | TextureId | WorldId
+data GLInterpretation :: SceneElementType -> * where
+  GLVertex :: V2 Float -> GLInterpretation TVertex
+  GLWall :: IO () -> GLInterpretation TWall
+  GLSector :: SectorProperties -> IO () -> Material.Material -> GLInterpretation TSector
+  GLWorld :: [GLInterpretation TSector] -> [GLInterpretation TWall] -> GLInterpretation TWorld
+  GLTexture :: GLTextureObject -> GLInterpretation TTexture
+  GLMaterial :: Material.Material -> GLInterpretation TMaterial
 
-infixr 8 :::
-
-data TList :: (k -> *) -> [k] -> * where
-  TNil :: TList f '[]
-  (:::) :: f t -> TList f ts -> TList f (t ': ts)
-
-tmap :: (forall a. f a -> g a) -> TList f as -> TList g as
-tmap _ TNil = TNil
-tmap f (x ::: xs) = f x ::: tmap f xs
-
-ttraverse :: Applicative i => (forall a. f a -> i (g a)) -> TList f xs -> i (TList g xs)
-ttraverse _ TNil = pure TNil
-ttraverse f (x ::: xs) = (:::) <$> f x <*> ttraverse f xs
-
-data LevelExpr :: (SceneElementId -> *) -> SceneElementId -> * where
-  -- | The basic ability to introduce names for things
-  Let :: (TList f ts -> TList (LevelExpr f) ts) -> (TList f ts -> LevelExpr f t) -> LevelExpr f t
-
-  -- | The ability to use a name
-  Var :: f t -> LevelExpr f t
-
-  -- | 'Literal' vertices
-  Vertex :: V2 Float -> LevelExpr f VertexId
-
-  -- | Walls between vertices, with their two sectors
-  Wall
-    :: LevelExpr f VertexId -> LevelExpr f VertexId  -- Start and end vertices
-    -> LevelExpr f SectorId -> Maybe (LevelExpr f SectorId) -- Front and (optional) back sector
-    -> LevelExpr f WallId
-
-  -- | Sectors take some basic properties, a list of vertices, and their material attributes
-  Sector
-    :: SectorProperties
-    -> [LevelExpr f VertexId] -- vertices
-    -> LevelExpr f MaterialId -- floor
-    -> LevelExpr f MaterialId -- ceiling
-    -> LevelExpr f MaterialId -- walls
-    -> LevelExpr f SectorId
-
-  -- | A material is the composition of a basic diffuse texture along with an optional normal map
-  Material
-    :: LevelExpr f TextureId
-    -> Maybe (LevelExpr f TextureId)
-    -> LevelExpr f MaterialId
-
-  -- | A texture refers to an image on disk
-  Texture :: FilePath -> LevelExpr f TextureId
-
-  World
-    :: [LevelExpr f SectorId]
-    -> [LevelExpr f WallId]
-    -> LevelExpr f WorldId
-
-newtype Level t = Level (forall f. LevelExpr f t)
-
-data SectorProperties =
-  SectorProperties {sectorFloor :: Float
-                   ,sectorCeiling :: Float}
-
-data GLInterpretation :: SceneElementId -> * where
-  GLVertex :: V2 Float -> GLInterpretation VertexId
-  GLWall :: IO () -> GLInterpretation WallId
-  GLSector :: SectorProperties -> IO () -> Material.Material -> GLInterpretation SectorId
-  GLWorld :: [GLInterpretation SectorId] -> [GLInterpretation WallId] -> GLInterpretation WorldId
-  GLTexture :: GLTextureObject -> GLInterpretation TextureId
-  GLMaterial :: Material.Material -> GLInterpretation MaterialId
-
-drawWorldTextured :: GLInterpretation WorldId -> IO ()
+drawWorldTextured :: GLInterpretation TWorld -> IO ()
 drawWorldTextured (GLWorld sectors walls) =
   do traverse_ (\(GLSector _ io mat) ->
                   do Material.activateMaterial mat
@@ -102,23 +42,29 @@ drawWorldTextured (GLWorld sectors walls) =
                sectors
      traverse_ (\(GLWall io) -> io) walls
 
-drawWorldGeometry :: GLInterpretation WorldId -> IO ()
+drawWorldGeometry :: GLInterpretation TWorld -> IO ()
 drawWorldGeometry (GLWorld sectors walls) =
   do traverse_ (\(GLSector _ io _) -> io) sectors
      traverse_ (\(GLWall io) -> io) walls
 
-compile :: Level l -> IO (GLInterpretation l)
-compile (Level levelExpr) = do go levelExpr
-  where go :: LevelExpr GLInterpretation t -> IO (GLInterpretation t)
+compile :: PWorld l -> IO (GLInterpretation l)
+compile (PWorld levelExpr) = go levelExpr
+  where go :: WorldExpr GLInterpretation t -> IO (GLInterpretation t)
         go (Let bindings in_) =
           do bindings' <- mfix (ttraverse go . bindings)
              go (in_ bindings')
         go (Var x) = return x
         go (Vertex v) = return (GLVertex v)
         go (Texture path) =
-          GLTexture <$> loadTexture path SRGB
-        go (Level.Material mkDiffuse mkNormals) = do
-          GLMaterial <$> (Material.Material <$> ((\(GLTexture t) -> t) <$> go mkDiffuse) <*> ((\(Just (GLTexture t)) -> t) <$> traverse go mkNormals))
+          GLTexture <$>
+          loadTexture path SRGB
+        go (Hadoom.World.Material mkDiffuse mkNormals) =
+          do GLMaterial <$>
+               (Material.Material <$>
+                ((\(GLTexture t) -> t) <$>
+                 go mkDiffuse) <*>
+                ((\(Just (GLTexture t)) -> t) <$>
+                 traverse go mkNormals))
         go (World mkSectors mkWalls) =
           do sectors <- traverse go mkSectors
              walls <- traverse go mkWalls
@@ -131,7 +77,7 @@ compile (Level levelExpr) = do go levelExpr
              let floorVertices =
                    vertices <&>
                    \(V2 x y) ->
-                     Sector.Vertex
+                     GL.Vertex
                        (realToFrac <$>
                         V3 x (sectorFloor props) y)
                        (V3 0 1 0)
@@ -142,8 +88,8 @@ compile (Level levelExpr) = do go levelExpr
                          recip textureSize))
                  ceilingVertices =
                    floorVertices <&>
-                   \(Sector.Vertex p n t bn uv) ->
-                     Sector.Vertex
+                   \(GL.Vertex p n t bn uv) ->
+                     GL.Vertex
                        (p & _y .~
                         realToFrac (sectorCeiling props))
                        (negate n)
@@ -160,7 +106,7 @@ compile (Level levelExpr) = do go levelExpr
              glBufferData
                GL_ARRAY_BUFFER
                (fromIntegral
-                  (sizeOf (undefined :: Sector.Vertex) *
+                  (sizeOf (undefined :: GL.Vertex) *
                    length allVertices))
                nullPtr
                GL_STATIC_DRAW
@@ -169,15 +115,15 @@ compile (Level levelExpr) = do go levelExpr
                           GL_ARRAY_BUFFER
                           0
                           (fromIntegral
-                             (sizeOf (undefined :: Sector.Vertex) *
+                             (sizeOf (undefined :: GL.Vertex) *
                               length allVertices)) .
                         castPtr)
-             configureVertexAttributes
+             GL.configureVertexAttributes
              -- Build the element buffer
              let floorIndices :: V.Vector GLuint
                  floorIndices =
                    fromIntegral <$>
-                   Sector.triangulate (V.fromList vertices)
+                   triangulate (V.fromList vertices)
                  ceilingIndices =
                    let reverseTriangles v =
                          case V.splitAt 3 v of
@@ -239,7 +185,7 @@ compile (Level levelExpr) = do go levelExpr
              glBufferData
                GL_ARRAY_BUFFER
                (fromIntegral
-                  (sizeOf (undefined :: Sector.Vertex) *
+                  (sizeOf (undefined :: GL.Vertex) *
                    (4 +
                     (if drawLower
                         then 4
@@ -259,7 +205,7 @@ compile (Level levelExpr) = do go levelExpr
                    realToFrac (frontHeight / textureSize) -- TODO Should depend on bottom/top in mkVertices
                  mkVertices bottom top =
                    getZipList
-                     (Sector.Vertex <$>
+                     (GL.Vertex <$>
                       (fmap realToFrac <$>
                        ZipList [V3 (v1 ^. _x)
                                    bottom
@@ -286,7 +232,7 @@ compile (Level levelExpr) = do go levelExpr
              -- Upload the main wall segment vertex data
              let sizeOfWall =
                    4 *
-                   fromIntegral (sizeOf (undefined :: Sector.Vertex))
+                   fromIntegral (sizeOf (undefined :: GL.Vertex))
              withArray (mkVertices frontFloor frontCeiling)
                        (glBufferSubData GL_ARRAY_BUFFER 0 sizeOfWall .
                         castPtr)
@@ -302,11 +248,17 @@ compile (Level levelExpr) = do go levelExpr
                \(GLSector (SectorProperties backFloor _) _ _) ->
                  when drawLower
                       (withArray (mkVertices frontFloor backFloor)
-                                 (glBufferSubData GL_ARRAY_BUFFER (if drawUpper then 2 * sizeOfWall else sizeOfWall) sizeOfWall .
+                                 (glBufferSubData
+                                    GL_ARRAY_BUFFER
+                                    (if drawUpper
+                                        then 2 * sizeOfWall
+                                        else sizeOfWall)
+                                    sizeOfWall .
                                   castPtr))
-             configureVertexAttributes
+             GL.configureVertexAttributes
              return (GLWall (do glBindVertexArray vao
-                                when (not (drawUpper || drawLower)) (glDrawArrays GL_TRIANGLE_FAN 0 4) -- TODO
+                                when (not (drawUpper || drawLower))
+                                     (glDrawArrays GL_TRIANGLE_FAN 0 4) -- TODO
                                 when drawUpper (glDrawArrays GL_TRIANGLE_FAN 4 4)
                                 when drawLower
                                      (glDrawArrays
@@ -316,99 +268,49 @@ compile (Level levelExpr) = do go levelExpr
                                             else 4)
                                         4)))
 
-
-configureVertexAttributes :: IO ()
-configureVertexAttributes =
-  do let stride =
-           fromIntegral (sizeOf (undefined :: Sector.Vertex))
-         normalOffset =
-           fromIntegral (sizeOf (0 :: V3 CFloat))
-         tangentOffset =
-           normalOffset +
-           fromIntegral (sizeOf (0 :: V3 CFloat))
-         bitangentOffset =
-           tangentOffset +
-           fromIntegral (sizeOf (0 :: V3 CFloat))
-         uvOffset =
-           bitangentOffset +
-           fromIntegral (sizeOf (0 :: V3 CFloat))
-     glVertexAttribPointer positionAttribute 3 GL_FLOAT GL_FALSE stride nullPtr
-     glEnableVertexAttribArray positionAttribute
-     glVertexAttribPointer normalAttribute
-                           3
-                           GL_FLOAT
-                           GL_FALSE
-                           stride
-                           (nullPtr `plusPtr` normalOffset)
-     glEnableVertexAttribArray normalAttribute
-     glVertexAttribPointer tangentAttribute
-                           3
-                           GL_FLOAT
-                           GL_FALSE
-                           stride
-                           (nullPtr `plusPtr` tangentOffset)
-     glEnableVertexAttribArray tangentAttribute
-     glVertexAttribPointer bitangentAttribute
-                           3
-                           GL_FLOAT
-                           GL_FALSE
-                           stride
-                           (nullPtr `plusPtr` bitangentOffset)
-     glEnableVertexAttribArray bitangentAttribute
-     glVertexAttribPointer uvAttribute
-                           2
-                           GL_FLOAT
-                           GL_FALSE
-                           stride
-                           (nullPtr `plusPtr` uvOffset)
-     glEnableVertexAttribArray uvAttribute
-
-letrec :: (TList (LevelExpr f) ts -> TList (LevelExpr f) ts)
-       -> (TList (LevelExpr f) ts -> LevelExpr f t)
-       -> LevelExpr f t
-letrec es e =
-  Let (\xs -> es (tmap Var xs))
-      (\xs -> e (tmap Var xs))
-
-testWorld :: Level WorldId
+testWorld :: PWorld TWorld
 testWorld =
-  Level (letrec (\_ ->
-                   Level.Material (Texture "stonework-diffuse.png") (Just (Texture "stonework-normals.png")) :::
-                   Vertex (V2 (-10) (-10)) :::
-                   Vertex (V2 (-2) (-10)) :::
-                   Vertex (V2 2 (-10)) :::
-                   Vertex (V2 10 (-10)) :::
-                   Vertex (V2 10 10) :::
-                   Vertex (V2 (-10) 10) :::
-                   Vertex (V2 3 (-40)) :::
-                   Vertex (V2 (-3) (-40)) :::
-                   TNil)
-                (\(m ::: v1 ::: v2 ::: v3 ::: v4 ::: v5 ::: v6 ::: v7 ::: v8 ::: _) ->
-                   letrec (\_ ->
-                             Sector (SectorProperties (-3)
-                                                      10)
-                                    [v1,v2,v3,v4,v5,v6]
-                                    m
-                                    m
-                                    m :::
-                             Sector (SectorProperties (-2)
-                                                      5)
-                                    [v2,v8,v7,v3]
-                                    m
-                                    m
-                                    m :::
-                             TNil)
-                          (\(s1 ::: s2 ::: TNil) ->
-                             World [s1,s2]
-                                   [Wall v1 v2 s1 Nothing
-                                   ,Wall v2 v3 s1 (Just s2)
-                                   ,Wall v3 v4 s1 Nothing
-                                   ,Wall v4 v5 s1 Nothing
-                                   ,Wall v5 v6 s1 Nothing
-                                   ,Wall v6 v1 s1 Nothing
-                                   ,Wall v2 v8 s2 Nothing
-                                   ,Wall v8 v7 s2 Nothing
-                                   ,Wall v7 v3 s2 Nothing])))
+  PWorld (letrec (\_ ->
+                    Hadoom.World.Material (Texture "stonework-diffuse.png")
+                                          (Just (Texture "stonework-normals.png")) :::
+                    Vertex (V2 (-10)
+                               (-10)) :::
+                    Vertex (V2 (-2)
+                               (-10)) :::
+                    Vertex (V2 2 (-10)) :::
+                    Vertex (V2 10 (-10)) :::
+                    Vertex (V2 10 10) :::
+                    Vertex (V2 (-10) 10) :::
+                    Vertex (V2 3 (-40)) :::
+                    Vertex (V2 (-3)
+                               (-40)) :::
+                    TNil)
+                 (\(m ::: v1 ::: v2 ::: v3 ::: v4 ::: v5 ::: v6 ::: v7 ::: v8 ::: _) ->
+                    letrec (\_ ->
+                              Sector (SectorProperties (-3)
+                                                       10)
+                                     [v1,v2,v3,v4,v5,v6]
+                                     m
+                                     m
+                                     m :::
+                              Sector (SectorProperties (-2)
+                                                       5)
+                                     [v2,v8,v7,v3]
+                                     m
+                                     m
+                                     m :::
+                              TNil)
+                           (\(s1 ::: s2 ::: TNil) ->
+                              World [s1,s2]
+                                    [Wall v1 v2 s1 Nothing
+                                    ,Wall v2 v3 s1 (Just s2)
+                                    ,Wall v3 v4 s1 Nothing
+                                    ,Wall v4 v5 s1 Nothing
+                                    ,Wall v5 v6 s1 Nothing
+                                    ,Wall v6 v1 s1 Nothing
+                                    ,Wall v2 v8 s2 Nothing
+                                    ,Wall v8 v7 s2 Nothing
+                                    ,Wall v7 v3 s2 Nothing])))
 
 textureSize :: Float
 textureSize = 2.5
