@@ -42,24 +42,28 @@ data CompiledWall =
                , cwMiddle :: Maybe WallSegment
                }
 
+data CompiledWorld =
+  CompiledWorld {cwSectors :: [CompiledSector]
+                ,cwWalls :: [CompiledWall]}
+
 data GLInterpretation :: SceneElementType -> * where
   GLVertex :: V2 Float -> GLInterpretation TVertex
   GLWall :: CompiledWall -> GLInterpretation TWall
   GLSector :: CompiledSector -> GLInterpretation TSector
-  GLWorld :: [GLInterpretation TSector] -> [GLInterpretation TWall] -> GLInterpretation TWorld
+  GLWorld :: CompiledWorld -> GLInterpretation TWorld
   GLTexture :: GLTextureObject -> GLInterpretation TTexture
   GLMaterial :: Material.Material -> GLInterpretation TMaterial
 
 -- | Given a compiled world, render the entire world with the correct materials.
-drawWorldTextured :: GLInterpretation TWorld -> IO ()
-drawWorldTextured (GLWorld sectors walls) =
-  do traverse_ (\(GLSector CompiledSector{..}) ->
+drawWorldTextured :: CompiledWorld -> IO ()
+drawWorldTextured (CompiledWorld sectors walls) =
+  do traverse_ (\CompiledSector{..} ->
                   do Material.activateMaterial csFloorMat
                      csRenderFloor
                      Material.activateMaterial csCeilingMat
                      csRenderCeiling)
                sectors
-     traverse_ (\(GLWall CompiledWall{..}) ->
+     traverse_ (\CompiledWall{..} ->
                   do for_ cwLower
                           (\WallSegment{..} ->
                              do Material.activateMaterial wsMat
@@ -77,13 +81,13 @@ drawWorldTextured (GLWorld sectors walls) =
 -- | Given a compiled world, render everything, but do not change materials.
 -- Used for prefilling the depth buffer, or rendering depth for light shadow
 -- maps.
-drawWorldGeometry :: GLInterpretation TWorld -> IO ()
-drawWorldGeometry (GLWorld sectors walls) =
-  do traverse_ (\(GLSector CompiledSector{..}) ->
+drawWorldGeometry :: CompiledWorld -> IO ()
+drawWorldGeometry (CompiledWorld sectors walls) =
+  do traverse_ (\CompiledSector{..} ->
                   do csRenderFloor
                      csRenderCeiling)
                sectors
-     traverse_ (\(GLWall CompiledWall{..}) ->
+     traverse_ (\CompiledWall{..} ->
                   do for_ cwLower (\WallSegment{..} -> wsRender)
                      for_ cwUpper (\WallSegment{..} -> wsRender)
                      for_ cwMiddle (\WallSegment{..} -> wsRender))
@@ -109,9 +113,9 @@ compile (PWorld levelExpr) = go levelExpr
                 ((\(Just (GLTexture t)) -> t) <$>
                  traverse go mkNormals))
         go (World mkSectors mkWalls) =
-          do sectors <- traverse go mkSectors
-             walls <- traverse go mkWalls
-             return (GLWorld sectors walls)
+          do sectors <- traverse (go >=> \(GLSector s) -> return s) mkSectors
+             walls <- traverse (go >=> \(GLWall w) -> return w) mkWalls
+             return (GLWorld (CompiledWorld sectors walls))
         go (Sector props mkVertices mkFloorMat mkCeilingMat) =
           do
              -- Realise all vertices
@@ -341,62 +345,6 @@ compile (PWorld levelExpr) = go levelExpr
                          go mkMat) <*>
                         pure (do glBindVertexArray vao
                                  glDrawArrays GL_TRIANGLE_FAN 0 4))))
-
-testWorld :: PWorld TWorld
-testWorld =
-  PWorld (letrec (\_ ->
-                    Texture "flat.jpg" Linear :::
-                    TNil)
-                 (\(flat ::: _) ->
-                    letrec (\_ ->
-                              Hadoom.World.Material (Texture "DHTP/textures/gstone2.png" SRGB)
-                                                    (Just flat) :::
-                              Hadoom.World.Material (Texture "DHTP/flats/flat5.png" SRGB)
-                                                    (Just flat) :::
-                              Hadoom.World.Material (Texture "DHTP/flats/ceil3_3.png" SRGB)
-                                                    (Just flat) :::
-                              Hadoom.World.Material (Texture "DHTP/textures/bigdoor2.png" SRGB)
-                                                    (Just flat) :::
-                              Vertex (V2 (-2)
-                                         (-2)) :::
-                              Vertex (V2 (-1.2)
-                                         (-2)) :::
-                              Vertex (V2 1.2 (-2)) :::
-                              Vertex (V2 2 (-2)) :::
-                              Vertex (V2 2 2) :::
-                              Vertex (V2 (-2) 2) :::
-                              Vertex (V2 1.2 (-40)) :::
-                              Vertex (V2 (-1.2)
-                                         (-40)) :::
-                              TNil)
-                           (\(wt ::: ft ::: ct ::: lt ::: v1 ::: v2 ::: v3 ::: v4 ::: v5 ::: v6 ::: v7 ::: v8 ::: _) ->
-                              letrec (\_ ->
-                                        Sector (SectorProperties 0 3)
-                                               [v1,v2,v3,v4,v5,v6]
-                                               ft
-                                               ct :::
-                                        Sector (SectorProperties 0 2.5)
-                                               [v2,v8,v7,v3]
-                                               ft
-                                               ct :::
-                                        TNil)
-                                     (\(s1 ::: s2 ::: TNil) ->
-                                        World [s1,s2]
-                                              [Wall v1 v2 s1 Nothing (Just wt) Nothing Nothing
-                                              ,Wall v2
-                                                    v3
-                                                    s1
-                                                    (Just s2)
-                                                    (Just lt)
-                                                    (Just wt)
-                                                    (Just wt)
-                                              ,Wall v3 v4 s1 Nothing (Just wt) Nothing Nothing
-                                              ,Wall v4 v5 s1 Nothing (Just wt) Nothing Nothing
-                                              ,Wall v5 v6 s1 Nothing (Just wt) Nothing Nothing
-                                              ,Wall v6 v1 s1 Nothing (Just wt) Nothing Nothing
-                                              ,Wall v2 v8 s2 Nothing (Just wt) Nothing Nothing
-                                              ,Wall v8 v7 s2 Nothing (Just wt) Nothing Nothing
-                                              ,Wall v7 v3 s2 Nothing (Just wt) Nothing Nothing]))))
 
 textureSize :: Float
 textureSize = 2.5

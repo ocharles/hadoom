@@ -9,37 +9,36 @@
 {-# LANGUAGE TemplateHaskell #-}
 module Hadoom where
 
-import Control.Wire hiding (when)
 import Control.Exception (finally)
 import Control.Lens hiding (indices)
 import Control.Monad (forM_, when)
-import Control.Monad.Trans.Class (lift)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Loops (unfoldM)
 import Control.Monad.Reader (MonadReader)
 import Control.Monad.State (MonadState)
+import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Reader (runReaderT)
 import Control.Monad.Trans.State.Strict (evalStateT, execStateT)
+import Control.Wire hiding (when)
 import Data.Distributive (distribute)
 import Data.Function (fix)
-import Data.Tuple (swap)
 import Data.Maybe (fromMaybe)
+import Data.Tuple (swap)
 import Foreign
 import Foreign.C
 import Graphics.GL
+import Hadoom.GL.World
 import Light
 import Linear as L
 import Material
 import Physics
 import Prelude hiding (any, floor, (.), id)
 import Shader
+import TestWorld
 import Util
 import qualified Data.Vector as V
 import qualified Quine.Debug as Quine
 import qualified SDL
-
-import qualified Hadoom.GL.World as NewLevelDef
-import qualified Hadoom.World as NewLevelDef
 
 screenWidth, screenHeight :: GLsizei
 (screenWidth,screenHeight) = (1024,768)
@@ -47,7 +46,7 @@ screenWidth, screenHeight :: GLsizei
 --------------------------------------------------------------------------------
 data RenderData =
   RenderData {_lightFBO :: GLuint
-             ,_world :: NewLevelDef.GLInterpretation NewLevelDef.TWorld
+             ,_world :: CompiledWorld
              ,_lightTextures :: V.Vector (GLTextureObject,GLTextureObject)
              ,_nullVao :: GLuint
              }
@@ -157,7 +156,7 @@ hadoom win =
         loadRenderData =
           RenderData <$>
           (unGLFramebufferObject <$> genLightFramebufferObject) <*>
-          NewLevelDef.compile NewLevelDef.testWorld <*>
+          (compile testWorld >>= \(GLWorld w) -> return w) <*>
           V.replicateM 10
                        ((,) <$> genLightDepthMap <*> genLightDepthMap) <*>
           overPtr (glGenVertexArrays 1)
@@ -214,7 +213,7 @@ renderLightDepthTexture l t1 t2 =
              glClearColor 0 0 0 0
              do s <- use shadowShader
                 setUniform s "depthV" v
-             liftIO . NewLevelDef.drawWorldGeometry =<< view world
+             liftIO . drawWorldGeometry =<< view world
         fullscreenQuad =
           do (src,dst) <- use id
              glFramebufferTexture2D GL_FRAMEBUFFER GL_COLOR_ATTACHMENT0 GL_TEXTURE_2D dst 0
@@ -286,7 +285,7 @@ renderFromCamera lights =
         renderDepthBuffer =
           do glClear GL_DEPTH_BUFFER_BIT
              glUseProgram . unGLProgram =<< use sceneShader
-             liftIO . NewLevelDef.drawWorldGeometry =<< view world
+             liftIO . drawWorldGeometry =<< view world
         prepareMultipassRendering =
           do glEnable GL_BLEND
              glBlendFunc GL_ONE GL_ONE
@@ -310,7 +309,7 @@ renderFromCamera lights =
                                              (fromIntegral (sizeOf (undefined :: Light)))
                                              (castPtr ptr)
                                              GL_STREAM_DRAW))
-             liftIO . NewLevelDef.drawWorldTextured =<< view world
+             liftIO . drawWorldTextured =<< view world
 
 --------------------------------------------------------------------------------
 withHadoom :: (SDL.Window -> IO b) -> IO b

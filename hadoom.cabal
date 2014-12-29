@@ -51,6 +51,7 @@ Library
     Light
     Material
     Physics
+    TestWorld
     Quine.Debug
     Shader
     Util
