@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE Arrows #-}
 {-# LANGUAGE MultiWayIf #-}
@@ -43,6 +44,8 @@ import qualified Data.Vector.Storable as SV
 import qualified FRP
 import qualified Quine.Debug as Quine
 import qualified SDL
+
+import qualified Level as NewLevelDef
 
 screenWidth, screenHeight :: GLsizei
 (screenWidth,screenHeight) = (800,600)
@@ -102,12 +105,15 @@ hadoom :: [Sector] -> SDL.Window -> IO b
 hadoom sectors win =
   do tstart <- getCurrentTime
      static <- loadRenderData
+     NewLevelDef.GLWorld drawWorld <- NewLevelDef.compile NewLevelDef.testWorld
      runReaderT
        (do initialShaders <- liftIO reloadShaders
-           evalStateT (fix step (scene,tstart))
-                      initialShaders)
+           evalStateT
+             (fix (step drawWorld)
+                  (scene,tstart))
+             initialShaders)
        static
-  where step again (w,currentTime) =
+  where step drawWorld again (w,currentTime) =
           do newTime <- liftIO getCurrentTime
              let frameTime = newTime `diffUTCTime` currentTime
              events <- liftIO (unfoldM SDL.pollEvent)
@@ -125,8 +131,12 @@ hadoom sectors win =
                   (distribute
                      (fromMaybe (error "Failed to invert view matrix")
                                 (inv44 viewMat)))
-             lights' <- renderLightDepthTextures (V.take 10 lights)
-             renderFromCamera lights'
+             -- lights' <- renderLightDepthTextures (V.take 10 lights)
+             -- renderFromCamera lights'
+             do glBindFramebuffer GL_FRAMEBUFFER 0
+                glViewport 0 0 screenWidth screenHeight
+                glClear (GL_COLOR_BUFFER_BIT .|. GL_DEPTH_BUFFER_BIT)
+                liftIO drawWorld
              SDL.glSwapWindow win
              again (w',newTime)
         reloadShadersRequested = (`hasScancode` SDL.ScancodeR)

@@ -37,6 +37,7 @@ Library
                 , vector
   exposed-modules:
     Camera
+    Level
     FRP
     Geometry
     Hadoom
