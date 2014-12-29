@@ -1,12 +1,13 @@
+{-# LANGUAGE Arrows #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE Arrows #-}
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE OverloadedLists #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TemplateHaskell #-}
 module Hadoom where
 
 import Control.Applicative
@@ -48,7 +49,7 @@ screenWidth, screenHeight :: GLsizei
 --------------------------------------------------------------------------------
 data RenderData =
   RenderData {_lightFBO :: GLuint
-             ,_world :: NewLevelDef.GLInterpretation NewLevelDef.World
+             ,_world :: NewLevelDef.GLInterpretation NewLevelDef.WorldId
              ,_lightTextures :: V.Vector (GLTextureObject,GLTextureObject)
              ,_nullVao :: GLuint
              }

@@ -25,12 +25,7 @@ import qualified Data.Vector as V
 import qualified Data.Vector.Storable as SV
 import qualified Sector
 
-data VertexId
-data WallId
-data SectorId
-data MaterialId
-data TextureId
-data World
+data SceneElementId = VertexId | WallId | SectorId | MaterialId | TextureId | WorldId
 
 infixr 8 :::
 
@@ -46,7 +41,7 @@ ttraverse :: Applicative i => (forall a. f a -> i (g a)) -> TList f xs -> i (TLi
 ttraverse _ TNil = pure TNil
 ttraverse f (x ::: xs) = (:::) <$> f x <*> ttraverse f xs
 
-data LevelExpr :: (* -> *) -> * -> * where
+data LevelExpr :: (SceneElementId -> *) -> SceneElementId -> * where
   -- | The basic ability to introduce names for things
   Let :: (TList f ts -> TList (LevelExpr f) ts) -> (TList f ts -> LevelExpr f t) -> LevelExpr f t
 
@@ -83,7 +78,7 @@ data LevelExpr :: (* -> *) -> * -> * where
   World
     :: [LevelExpr f SectorId]
     -> [LevelExpr f WallId]
-    -> LevelExpr f World
+    -> LevelExpr f WorldId
 
 newtype Level t = Level (forall f. LevelExpr f t)
 
@@ -91,15 +86,15 @@ data SectorProperties =
   SectorProperties {sectorFloor :: Float
                    ,sectorCeiling :: Float}
 
-data GLInterpretation :: * -> * where
+data GLInterpretation :: SceneElementId -> * where
   GLVertex :: V2 Float -> GLInterpretation VertexId
   GLWall :: IO () -> GLInterpretation WallId
   GLSector :: SectorProperties -> IO () -> Material.Material -> GLInterpretation SectorId
-  GLWorld :: [GLInterpretation SectorId] -> [GLInterpretation WallId] -> GLInterpretation World
+  GLWorld :: [GLInterpretation SectorId] -> [GLInterpretation WallId] -> GLInterpretation WorldId
   GLTexture :: GLTextureObject -> GLInterpretation TextureId
   GLMaterial :: Material.Material -> GLInterpretation MaterialId
 
-drawWorldTextured :: GLInterpretation World -> IO ()
+drawWorldTextured :: GLInterpretation WorldId -> IO ()
 drawWorldTextured (GLWorld sectors walls) =
   do traverse_ (\(GLSector _ io mat) ->
                   do Material.activateMaterial mat
@@ -107,7 +102,7 @@ drawWorldTextured (GLWorld sectors walls) =
                sectors
      traverse_ (\(GLWall io) -> io) walls
 
-drawWorldGeometry :: GLInterpretation World -> IO ()
+drawWorldGeometry :: GLInterpretation WorldId -> IO ()
 drawWorldGeometry (GLWorld sectors walls) =
   do traverse_ (\(GLSector _ io _) -> io) sectors
      traverse_ (\(GLWall io) -> io) walls
@@ -375,7 +370,7 @@ letrec es e =
   Let (\xs -> es (tmap Var xs))
       (\xs -> e (tmap Var xs))
 
-testWorld :: Level World
+testWorld :: Level WorldId
 testWorld =
   Level (letrec (\_ ->
                    Level.Material (Texture "stonework-diffuse.png") (Just (Texture "stonework-normals.png")) :::
