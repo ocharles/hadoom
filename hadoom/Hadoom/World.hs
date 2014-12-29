@@ -12,6 +12,7 @@ module Hadoom.World
 import BasePrelude
 import Data.TList
 import Linear
+import Material
 import System.IO
 
 -- | The set of types of scene elements in a world.
@@ -63,7 +64,7 @@ data WorldExpr :: (SceneElementType -> *) -> SceneElementType -> * where
     -> WorldExpr f TMaterial
 
   -- | A texture refers to an image on disk.
-  Texture :: FilePath -> WorldExpr f TTexture
+  Texture :: FilePath -> ColorSpace -> WorldExpr f TTexture
 
   World
     :: [WorldExpr f TSector]

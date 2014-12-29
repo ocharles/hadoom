@@ -98,9 +98,9 @@ compile (PWorld levelExpr) = go levelExpr
           mfix (ttraverse go . bindings)
         go (Var x) = return x
         go (Vertex v) = return (GLVertex v)
-        go (Texture path) =
+        go (Texture path colorSpace) =
           GLTexture <$>
-          loadTexture path SRGB
+          loadTexture path colorSpace
         go (Hadoom.World.Material mkDiffuse mkNormals) =
           do GLMaterial <$>
                (Material.Material <$>
@@ -345,17 +345,17 @@ compile (PWorld levelExpr) = go levelExpr
 testWorld :: PWorld TWorld
 testWorld =
   PWorld (letrec (\_ ->
-                    Texture "flat.jpg" :::
+                    Texture "flat.jpg" Linear :::
                     TNil)
                  (\(flat ::: _) ->
                     letrec (\_ ->
-                              Hadoom.World.Material (Texture "DHTP/textures/gstone2.png")
+                              Hadoom.World.Material (Texture "DHTP/textures/gstone2.png" SRGB)
                                                     (Just flat) :::
-                              Hadoom.World.Material (Texture "DHTP/flats/flat5.png")
+                              Hadoom.World.Material (Texture "DHTP/flats/flat5.png" SRGB)
                                                     (Just flat) :::
-                              Hadoom.World.Material (Texture "DHTP/flats/ceil3_3.png")
+                              Hadoom.World.Material (Texture "DHTP/flats/ceil3_3.png" SRGB)
                                                     (Just flat) :::
-                              Hadoom.World.Material (Texture "DHTP/textures/bigdoor2.png")
+                              Hadoom.World.Material (Texture "DHTP/textures/bigdoor2.png" SRGB)
                                                     (Just flat) :::
                               Vertex (V2 (-2)
                                          (-2)) :::
