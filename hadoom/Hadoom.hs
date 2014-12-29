@@ -42,7 +42,7 @@ import qualified Hadoom.GL.World as NewLevelDef
 import qualified Hadoom.World as NewLevelDef
 
 screenWidth, screenHeight :: GLsizei
-(screenWidth,screenHeight) = (800,600)
+(screenWidth,screenHeight) = (1024,768)
 
 --------------------------------------------------------------------------------
 data RenderData =
@@ -319,7 +319,7 @@ withHadoom m =
      win <- SDL.createWindow
               "Hadoom"
               SDL.defaultWindow {SDL.windowSize =
-                                   V2 800 600
+                                   fromIntegral <$> V2 screenWidth screenHeight
                                 ,SDL.windowOpenGL =
                                    Just (SDL.defaultOpenGL {SDL.glProfile =
                                                               SDL.Core SDL.Debug 3 2})}

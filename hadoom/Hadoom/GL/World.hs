@@ -288,8 +288,12 @@ compile (PWorld levelExpr) = go levelExpr
              let sizeOfWall =
                    4 *
                    fromIntegral (sizeOf (undefined :: GL.Vertex))
-             withArray (mkVertices (sectorFloor (csProperties compiledSector))
-                                   (sectorCeiling (csProperties compiledSector)))
+             withArray (mkVertices (case backSector of
+                                      Just (GLSector s) -> max (sectorFloor (csProperties compiledSector)) (sectorFloor (csProperties s))
+                                      Nothing -> sectorFloor (csProperties compiledSector))
+                                   (case backSector of
+                                      Just (GLSector s) -> min (sectorCeiling (csProperties compiledSector)) (sectorCeiling (csProperties s))
+                                      Nothing -> sectorCeiling (csProperties compiledSector)))
                        (glBufferSubData GL_ARRAY_BUFFER 0 sizeOfWall .
                         castPtr)
              -- Upload the upper-front wall segment, if necessary.
@@ -346,50 +350,58 @@ compile (PWorld levelExpr) = go levelExpr
 testWorld :: PWorld TWorld
 testWorld =
   PWorld (letrec (\_ ->
-                    Hadoom.World.Material (Texture "stonework-diffuse.png")
-                                          (Just (Texture "stonework-normals.png")) :::
-                    Hadoom.World.Material (Texture "RoughBlockWall-ColorMap.jpg")
-                                          (Just (Texture "RoughBlockWall-NormalMap.jpg")) :::
-                    Hadoom.World.Material (Texture "tiles.png")
-                                          (Just (Texture "tiles-normals.png")) :::
-                    Hadoom.World.Material (Texture "test-texture.jpg")
-                                          (Just (Texture "debug-normals.png")) :::
-                    Vertex (V2 (-10)
-                               (-10)) :::
-                    Vertex (V2 (-2)
-                               (-10)) :::
-                    Vertex (V2 2 (-10)) :::
-                    Vertex (V2 10 (-10)) :::
-                    Vertex (V2 10 10) :::
-                    Vertex (V2 (-10) 10) :::
-                    Vertex (V2 3 (-40)) :::
-                    Vertex (V2 (-3)
-                               (-40)) :::
+                    Texture "flat.jpg" :::
                     TNil)
-                 (\(wt ::: ft ::: ct ::: lt ::: v1 ::: v2 ::: v3 ::: v4 ::: v5 ::: v6 ::: v7 ::: v8 ::: _) ->
+                 (\(flat ::: _) ->
                     letrec (\_ ->
-                              Sector (SectorProperties (-3)
-                                                       10)
-                                     [v1,v2,v3,v4,v5,v6]
-                                     ft
-                                     ct :::
-                              Sector (SectorProperties (-2)
-                                                       5)
-                                     [v2,v8,v7,v3]
-                                     ft
-                                     ct :::
+                              Hadoom.World.Material (Texture "DHTP/textures/gstone2.png")
+                                                    (Just flat) :::
+                              Hadoom.World.Material (Texture "DHTP/flats/flat5.png")
+                                                    (Just flat) :::
+                              Hadoom.World.Material (Texture "DHTP/flats/ceil3_3.png")
+                                                    (Just flat) :::
+                              Hadoom.World.Material (Texture "DHTP/textures/bigdoor2.png")
+                                                    (Just flat) :::
+                              Vertex (V2 (-2)
+                                         (-2)) :::
+                              Vertex (V2 (-1.2)
+                                         (-2)) :::
+                              Vertex (V2 1.2 (-2)) :::
+                              Vertex (V2 2 (-2)) :::
+                              Vertex (V2 2 2) :::
+                              Vertex (V2 (-2) 2) :::
+                              Vertex (V2 1.2 (-40)) :::
+                              Vertex (V2 (-1.2)
+                                         (-40)) :::
                               TNil)
-                           (\(s1 ::: s2 ::: TNil) ->
-                              World [s1,s2]
-                                    [Wall v1 v2 s1 Nothing (Just wt) Nothing Nothing
-                                    ,Wall v2 v3 s1 (Just s2) Nothing (Just lt) (Just lt)
-                                    ,Wall v3 v4 s1 Nothing (Just wt) Nothing Nothing
-                                    ,Wall v4 v5 s1 Nothing (Just wt) Nothing Nothing
-                                    ,Wall v5 v6 s1 Nothing (Just wt) Nothing Nothing
-                                    ,Wall v6 v1 s1 Nothing (Just wt) Nothing Nothing
-                                    ,Wall v2 v8 s2 Nothing (Just wt) Nothing Nothing
-                                    ,Wall v8 v7 s2 Nothing (Just wt) Nothing Nothing
-                                    ,Wall v7 v3 s2 Nothing (Just wt) Nothing Nothing])))
+                           (\(wt ::: ft ::: ct ::: lt ::: v1 ::: v2 ::: v3 ::: v4 ::: v5 ::: v6 ::: v7 ::: v8 ::: _) ->
+                              letrec (\_ ->
+                                        Sector (SectorProperties 0 3)
+                                               [v1,v2,v3,v4,v5,v6]
+                                               ft
+                                               ct :::
+                                        Sector (SectorProperties 0 2.5)
+                                               [v2,v8,v7,v3]
+                                               ft
+                                               ct :::
+                                        TNil)
+                                     (\(s1 ::: s2 ::: TNil) ->
+                                        World [s1,s2]
+                                              [Wall v1 v2 s1 Nothing (Just wt) Nothing Nothing
+                                              ,Wall v2
+                                                    v3
+                                                    s1
+                                                    (Just s2)
+                                                    (Just lt)
+                                                    (Just wt)
+                                                    (Just wt)
+                                              ,Wall v3 v4 s1 Nothing (Just wt) Nothing Nothing
+                                              ,Wall v4 v5 s1 Nothing (Just wt) Nothing Nothing
+                                              ,Wall v5 v6 s1 Nothing (Just wt) Nothing Nothing
+                                              ,Wall v6 v1 s1 Nothing (Just wt) Nothing Nothing
+                                              ,Wall v2 v8 s2 Nothing (Just wt) Nothing Nothing
+                                              ,Wall v8 v7 s2 Nothing (Just wt) Nothing Nothing
+                                              ,Wall v7 v3 s2 Nothing (Just wt) Nothing Nothing]))))
 
 textureSize :: Float
 textureSize = 2.5

@@ -69,8 +69,9 @@ worldCamera =
       strafeSpeed = (+) <$> speedFromKey 3 SDL.ScancodeA
                         <*> speedFromKey (-3) SDL.ScancodeD
       strafeMotion = (^*) <$> strafeV <*> strafeSpeed
-  in set translation <$> ((+) <$> integral 0 . forwardMotion
-                              <*> integral 0 . strafeMotion)
+  in set translation <$> ((+) <$> pure (V3 0 1.75 0)
+                              <*> ((+) <$> integral 0 . forwardMotion
+                                       <*> integral 0 . strafeMotion))
                       <*> (m33_to_m44 . fromQuaternion . cameraQuat <$> c)
 
 keyPressed :: (Applicative m,Monoid e,MonadFix m)
