@@ -60,13 +60,14 @@ scene =
 worldCamera :: (Applicative m, HasTime t s, MonadFix m, Monoid e) => Wire s e m [SDL.Event] (M44 CFloat)
 worldCamera =
   let c = camera
+      speedFromKey s scancode = bool 0 s <$> keyHeld scancode
       forwardV = cameraForward <$> c
       strafeV = (fromQuaternion (axisAngle (V3 0 1 0) (pi / 2)) !*) <$> forwardV
-      forwardSpeed = (+) <$> (bool 0 10 <$> keyHeld SDL.ScancodeW)
-                         <*> (bool 0 (-10) <$> keyHeld SDL.ScancodeS)
+      forwardSpeed = (+) <$> speedFromKey 10 SDL.ScancodeW
+                         <*> speedFromKey (-10) SDL.ScancodeS
       forwardMotion = (^*) <$> forwardV <*> forwardSpeed
-      strafeSpeed = (+) <$> (bool 0 3 <$> keyHeld SDL.ScancodeA)
-                        <*> (bool 0 (-3) <$> keyHeld SDL.ScancodeD)
+      strafeSpeed = (+) <$> speedFromKey 3 SDL.ScancodeA
+                        <*> speedFromKey (-3) SDL.ScancodeD
       strafeMotion = (^*) <$> strafeV <*> strafeSpeed
   in set translation <$> ((+) <$> integral 0 . forwardMotion
                               <*> integral 0 . strafeMotion)
