@@ -48,21 +48,19 @@ data RenderData =
   RenderData {_lightFBO :: GLuint
              ,_world :: CompiledWorld
              ,_lightTextures :: V.Vector (GLTextureObject,GLTextureObject)
-             ,_nullVao :: GLuint
-             }
+             ,_nullVao :: GLuint}
 
 makeClassy ''RenderData
 
 -- Shaders can be refreshed during runtime, while the above data is immutable.
-data Shaders = Shaders
-    { _shadowShader :: GLProgram
-    ,_sceneShader :: GLProgram
-    ,_satProgram :: GLProgram
-    ,_spotlightIndex :: GLuint
-    ,_pointIndex :: GLuint
-    ,_lightsUBO :: GLuint
-    ,_reduceByAverage :: GLProgram
-    }
+data Shaders =
+  Shaders {_shadowShader :: GLProgram
+          ,_sceneShader :: GLProgram
+          ,_satProgram :: GLProgram
+          ,_spotlightIndex :: GLuint
+          ,_pointIndex :: GLuint
+          ,_lightsUBO :: GLuint
+          ,_reduceByAverage :: GLProgram}
 
 makeClassy ''Shaders
 

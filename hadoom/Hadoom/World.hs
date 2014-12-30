@@ -16,7 +16,14 @@ import Material
 import System.IO
 
 -- | The set of types of scene elements in a world.
-data SceneElementType = TVertex | TWall | TSector | TMaterial | TTexture | TWorld
+data SceneElementType
+  = TVertex
+  | TWall
+  | TSector
+  | TMaterial
+  | TTexture
+  | TWorld
+  | TWallFace
 
 -- | The description of a sector.
 data SectorProperties =
@@ -38,14 +45,21 @@ data WorldExpr :: (SceneElementType -> *) -> SceneElementType -> * where
   -- | Vertices in the 2D plane of the  world.
   Vertex :: V2 Float -> WorldExpr f TVertex
 
-  -- | Walls between vertices, with the front sector (the wall "faces" this
-  -- sector), and optional back sector. 'Nothing' implies the wall has its back
-  -- to the void.
+  -- | Walls between vertices. A wall has a front face, and an optional back
+  -- face.
   Wall
-    :: WorldExpr f TVertex -> WorldExpr f TVertex         -- Start and end vertices
-    -> WorldExpr f TSector -> Maybe (WorldExpr f TSector) -- Front and (optional) back sector
-    -> Maybe (WorldExpr f TMaterial) -> Maybe (WorldExpr f TMaterial) -> Maybe (WorldExpr f TMaterial)
+    :: WorldExpr f TVertex
+    -> WorldExpr f TVertex
+    -> WorldExpr f TWallFace
+    -> Maybe (WorldExpr f TWallFace)
     -> WorldExpr f TWall
+
+  WallFace
+    :: WorldExpr f TSector           -- The sector this wall face is facing
+    -> Maybe (WorldExpr f TMaterial) -- Lower texture
+    -> Maybe (WorldExpr f TMaterial) -- Middle texture
+    -> Maybe (WorldExpr f TMaterial) -- Upper texture
+    -> WorldExpr f TWallFace
 
   -- | Sectors take some basic properties, a list of vertices, and their material
   -- attributes.

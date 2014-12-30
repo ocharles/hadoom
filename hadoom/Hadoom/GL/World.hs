@@ -36,11 +36,14 @@ data WallSegment =
   WallSegment {wsMat :: CompiledMaterial
               ,wsRender :: IO ()}
 
+data CompiledWallFace =
+  CompiledWallFace {cwfLower :: Maybe WallSegment
+                   ,cwfUpper :: Maybe WallSegment
+                   ,cwfMiddle :: Maybe WallSegment}
+
 data CompiledWall =
-  CompiledWall { cwLower :: Maybe WallSegment
-               , cwUpper :: Maybe WallSegment
-               , cwMiddle :: Maybe WallSegment
-               }
+  CompiledWall {cwFront :: CompiledWallFace
+               ,cwBack :: Maybe CompiledWallFace}
 
 data CompiledWorld =
   CompiledWorld {cwSectors :: [CompiledSector]
@@ -49,6 +52,7 @@ data CompiledWorld =
 data GLInterpretation :: SceneElementType -> * where
   GLVertex :: V2 Float -> GLInterpretation TVertex
   GLWall :: CompiledWall -> GLInterpretation TWall
+  GLWallFace :: CompiledSector -> Maybe CompiledMaterial -> Maybe CompiledMaterial -> Maybe CompiledMaterial -> GLInterpretation TWallFace
   GLSector :: CompiledSector -> GLInterpretation TSector
   GLWorld :: CompiledWorld -> GLInterpretation TWorld
   GLTexture :: GLTextureObject -> GLInterpretation TTexture
@@ -64,18 +68,21 @@ drawWorldTextured (CompiledWorld sectors walls) =
                      csRenderCeiling)
                sectors
      traverse_ (\CompiledWall{..} ->
-                  do for_ cwLower
-                          (\WallSegment{..} ->
-                             do Material.activateMaterial wsMat
-                                wsRender)
-                     for_ cwUpper
-                          (\WallSegment{..} ->
-                             do Material.activateMaterial wsMat
-                                wsRender)
-                     for_ cwMiddle
-                          (\WallSegment{..} ->
-                             do Material.activateMaterial wsMat
-                                wsRender))
+                  let drawWallFace CompiledWallFace{..} =
+                        do for_ cwfLower
+                                (\WallSegment{..} ->
+                                   do Material.activateMaterial wsMat
+                                      wsRender)
+                           for_ cwfUpper
+                                (\WallSegment{..} ->
+                                   do Material.activateMaterial wsMat
+                                      wsRender)
+                           for_ cwfMiddle
+                                (\WallSegment{..} ->
+                                   do Material.activateMaterial wsMat
+                                      wsRender)
+                  in do drawWallFace cwFront
+                        traverse drawWallFace cwBack)
                walls
 
 -- | Given a compiled world, render everything, but do not change materials.
@@ -88,9 +95,12 @@ drawWorldGeometry (CompiledWorld sectors walls) =
                      csRenderCeiling)
                sectors
      traverse_ (\CompiledWall{..} ->
-                  do for_ cwLower (\WallSegment{..} -> wsRender)
-                     for_ cwUpper (\WallSegment{..} -> wsRender)
-                     for_ cwMiddle (\WallSegment{..} -> wsRender))
+                  let drawWallFace CompiledWallFace{..} =
+                        do for_ cwfLower (\WallSegment{..} -> wsRender)
+                           for_ cwfUpper (\WallSegment{..} -> wsRender)
+                           for_ cwfMiddle (\WallSegment{..} -> wsRender)
+                  in do drawWallFace cwFront
+                        traverse drawWallFace cwBack)
                walls
 
 -- | Compile a 'PWorld' into objects that can be used by OpenGL.
@@ -212,7 +222,7 @@ compile (PWorld levelExpr) = go levelExpr
                 ((\(GLMaterial m) -> m) <$>
                  go mkCeilingMat) <*>
                 pure props)
-        go (Wall mkV1 mkV2 mkFrontSector mkBackSector mkMidMat mkUpperMat mkLowerMat) =
+        go (Wall mkV1 mkV2 mkFrontFace mkBackFace) =
           do
              -- Allocate a vertex array object for this wall.
              vao <- overPtr (glGenVertexArrays 1)
@@ -220,17 +230,17 @@ compile (PWorld levelExpr) = go levelExpr
              -- Evaluate the start and end vertices, and the front and back sectors.
              GLVertex v1 <- go mkV1
              GLVertex v2 <- go mkV2
-             GLSector compiledSector <- go mkFrontSector
-             backSector <- traverse go mkBackSector
+             GLWallFace frontSector frontLowerMat frontUpperMat frontMidMat <- go mkFrontFace
+             mbackFace <- traverse go mkBackFace
              -- We only draw the lower- or upper-front segments of a wall if the
              -- back sector is visible.
              let (drawLower,drawUpper) =
                    fromMaybe (False,False)
-                             (do GLSector back <- backSector
-                                 return (sectorFloor (csProperties back) >
-                                         sectorFloor (csProperties compiledSector)
-                                        ,sectorCeiling (csProperties back) <
-                                         sectorCeiling (csProperties compiledSector)))
+                             (do GLWallFace backSector _ _ _ <- mbackFace
+                                 return (sectorFloor (csProperties backSector) >
+                                         sectorFloor (csProperties frontSector)
+                                        ,sectorCeiling (csProperties backSector) <
+                                         sectorCeiling (csProperties frontSector)))
              -- Allocate a buffer for the vertex data.
              vbo <- overPtr (glGenBuffers 1)
              glBindBuffer GL_ARRAY_BUFFER vbo
@@ -251,12 +261,12 @@ compile (PWorld levelExpr) = go levelExpr
              let wallV = v2 ^-^ v1
                  wallLen = norm wallV
                  frontHeight =
-                   sectorCeiling (csProperties compiledSector) -
-                   sectorFloor (csProperties compiledSector)
+                   sectorCeiling (csProperties frontSector) -
+                   sectorFloor (csProperties frontSector)
                  u =
                    realToFrac (wallLen / textureSize) :: CFloat
-                 v =
-                   realToFrac (frontHeight / textureSize) -- TODO Should depend on bottom/top in mkVertices
+                 -- v =
+                 --   realToFrac (frontHeight / textureSize) -- TODO Should depend on bottom/top in mkVertices
                  mkVertices bottom top =
                    getZipList
                      (GL.Vertex <$>
@@ -282,32 +292,39 @@ compile (PWorld levelExpr) = go levelExpr
                                                       realToFrac <$>
                                                       V3 x 0 y))) <*>
                       ZipList (repeat (V3 0 1 0)) <*>
-                      ZipList [V2 0 v,V2 0 0,V2 u 0,V2 u v])
-             -- Upload the main wall segment vertex data
+                      ZipList [V2 u 1,V2 0 1,V2 0 0,V2 u 0])
+             -- -- Upload the main wall segment vertex data
              let sizeOfWall =
                    4 *
                    fromIntegral (sizeOf (undefined :: GL.Vertex))
-             withArray (mkVertices (case backSector of
-                                      Just (GLSector s) -> max (sectorFloor (csProperties compiledSector)) (sectorFloor (csProperties s))
-                                      Nothing -> sectorFloor (csProperties compiledSector))
-                                   (case backSector of
-                                      Just (GLSector s) -> min (sectorCeiling (csProperties compiledSector)) (sectorCeiling (csProperties s))
-                                      Nothing -> sectorCeiling (csProperties compiledSector)))
+             withArray (mkVertices
+                          (case mbackFace of
+                             Just (GLWallFace s _ _ _) ->
+                               max (sectorFloor (csProperties frontSector))
+                                   (sectorFloor (csProperties s))
+                             Nothing ->
+                               sectorFloor (csProperties frontSector))
+                          (case mbackFace of
+                             Just (GLWallFace s _ _ _) ->
+                               min (sectorCeiling (csProperties frontSector))
+                                   (sectorCeiling (csProperties s))
+                             Nothing ->
+                               sectorCeiling (csProperties frontSector)))
                        (glBufferSubData GL_ARRAY_BUFFER 0 sizeOfWall .
                         castPtr)
              -- Upload the upper-front wall segment, if necessary.
-             for_ backSector $
-               \(GLSector back) ->
+             for_ mbackFace $
+               \(GLWallFace backSector _ _ _) ->
                  when drawUpper
-                      (withArray (mkVertices (sectorCeiling (csProperties back))
-                                             (sectorCeiling (csProperties compiledSector)))
+                      (withArray (mkVertices (sectorCeiling (csProperties backSector))
+                                             (sectorCeiling (csProperties frontSector)))
                                  (glBufferSubData GL_ARRAY_BUFFER sizeOfWall sizeOfWall .
                                   castPtr))
              -- Upload the lower-front wall segment, if necessary.
-             for_ backSector $
-               \(GLSector back) ->
+             for_ mbackFace $
+               \(GLWallFace back _ _ _) ->
                  when drawLower
-                      (withArray (mkVertices (sectorFloor (csProperties compiledSector))
+                      (withArray (mkVertices (sectorFloor (csProperties frontSector))
                                              (sectorFloor (csProperties back)))
                                  (glBufferSubData
                                     GL_ARRAY_BUFFER
@@ -317,34 +334,39 @@ compile (PWorld levelExpr) = go levelExpr
                                     sizeOfWall .
                                   castPtr))
              GL.configureVertexAttributes
-             GLWall <$>
-               (CompiledWall <$>
-                (for (backSector >> mkLowerMat)
-                     (\mkMat ->
-                        WallSegment <$>
-                        ((\(GLMaterial m) -> m) <$>
-                         go mkMat) <*>
-                        pure (do glBindVertexArray vao
-                                 glDrawArrays
-                                   GL_TRIANGLE_FAN
-                                   (if drawUpper
-                                       then 8
-                                       else 4)
-                                   4))) <*>
-                (for (backSector >> mkUpperMat)
-                     (\mkMat ->
-                        WallSegment <$>
-                        ((\(GLMaterial m) -> m) <$>
-                         go mkMat) <*>
-                        pure (do glBindVertexArray vao
-                                 glDrawArrays GL_TRIANGLE_FAN 4 4))) <*>
-                (for mkMidMat
-                     (\mkMat ->
-                        WallSegment <$>
-                        ((\(GLMaterial m) -> m) <$>
-                         go mkMat) <*>
-                        pure (do glBindVertexArray vao
-                                 glDrawArrays GL_TRIANGLE_FAN 0 4))))
+             return
+               (GLWall (CompiledWall
+                          (CompiledWallFace
+                             ((mbackFace >> frontLowerMat) <&>
+                              (\mat ->
+                                 WallSegment
+                                   mat
+                                   (do glBindVertexArray vao
+                                       glDrawArrays
+                                         GL_TRIANGLE_FAN
+                                         (if drawUpper
+                                             then 8
+                                             else 4)
+                                         4)))
+                             ((mbackFace >> frontUpperMat) <&>
+                              (\mat ->
+                                 WallSegment
+                                   mat
+                                   (do glBindVertexArray vao
+                                       glDrawArrays GL_TRIANGLE_FAN 4 4)))
+                             (frontMidMat <&>
+                              (\mat ->
+                                 WallSegment
+                                   mat
+                                   (do glBindVertexArray vao
+                                       glDrawArrays GL_TRIANGLE_FAN 0 4))))
+                          Nothing))
+        go (WallFace s mkLower mkUpper mkMid) =
+          GLWallFace <$>
+             (go s >>= \(GLSector s) -> return s) <*>
+             traverse (go >=> \(GLMaterial m) -> return m) mkLower <*>
+             traverse (go >=> \(GLMaterial m) -> return m) mkUpper <*>
+               traverse (go >=> \(GLMaterial m) -> return m) mkMid
 
 textureSize :: Float
 textureSize = 2.5

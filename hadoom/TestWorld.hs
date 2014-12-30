@@ -48,18 +48,13 @@ testWorld =
                                         TNil)
                                      (\(s1 ::: s2 ::: TNil) ->
                                         World [s1,s2]
-                                              [Wall v1 v2 s1 Nothing (Just wt) Nothing Nothing
-                                              ,Wall v2
-                                                    v3
-                                                    s1
-                                                    (Just s2)
-                                                    (Just lt)
-                                                    (Just wt)
-                                                    (Just wt)
-                                              ,Wall v3 v4 s1 Nothing (Just wt) Nothing Nothing
-                                              ,Wall v4 v5 s1 Nothing (Just wt) Nothing Nothing
-                                              ,Wall v5 v6 s1 Nothing (Just wt) Nothing Nothing
-                                              ,Wall v6 v1 s1 Nothing (Just wt) Nothing Nothing
-                                              ,Wall v2 v8 s2 Nothing (Just wt) Nothing Nothing
-                                              ,Wall v8 v7 s2 Nothing (Just wt) Nothing Nothing
-                                              ,Wall v7 v3 s2 Nothing (Just wt) Nothing Nothing]))))
+                                              [Wall v1 v2 (WallFace s1 Nothing Nothing (Just wt)) Nothing
+                                              ,Wall v2 v3 (WallFace s1 (Just lt) (Just wt) (Just wt))
+                                                          (Just (WallFace s2 Nothing Nothing Nothing))
+                                              ,Wall v3 v4 (WallFace s1 Nothing Nothing (Just wt)) Nothing
+                                              ,Wall v4 v5 (WallFace s1 Nothing Nothing (Just wt)) Nothing
+                                              ,Wall v5 v6 (WallFace s1 Nothing Nothing (Just wt)) Nothing
+                                              ,Wall v6 v1 (WallFace s1 Nothing Nothing (Just wt)) Nothing
+                                              ,Wall v2 v8 (WallFace s2 Nothing Nothing (Just wt)) Nothing
+                                              ,Wall v8 v7 (WallFace s2 Nothing Nothing (Just wt)) Nothing
+                                              ,Wall v7 v3 (WallFace s2 Nothing Nothing (Just wt)) Nothing]))))
