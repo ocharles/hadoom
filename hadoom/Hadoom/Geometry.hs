@@ -1,6 +1,5 @@
-{-# LANGUAGE OverloadedLists #-}
+
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE RecordWildCards #-}
 module Hadoom.Geometry where
 
 import Control.Applicative
@@ -44,10 +43,10 @@ makeSimple inner outer =
               (V.tail indexedOuter <> indexedOuter)
       intersections =
         V.map (\(s@(_,start_),e@(_,end_)) ->
-                 ((rayLineIntersection m
-                                       (V2 1 0)
-                                       start_
-                                       end_)
+                 (rayLineIntersection m
+                                      (V2 1 0)
+                                      start_
+                                      end_
                  ,s
                  ,e))
               edges
@@ -63,16 +62,16 @@ makeSimple inner outer =
           intersections
       (pIndex,p) =
         V.maximumBy (xMost `on` snd)
-                    [start,end]
+                    (V.fromList [start,end])
       containing =
         V.filter (\((_,a),(j,b),(_,c)) ->
                     j /= pIndex &&
                     triangleArea a b c <
                     0 &&
                     pointInTriangle m i p b)
-                 ((V.zip3 indexedOuter
-                          (V.drop 1 (indexedOuter <> indexedOuter))
-                          (V.drop 2 (indexedOuter <> indexedOuter))))
+                 (V.zip3 indexedOuter
+                         (V.drop 1 (indexedOuter <> indexedOuter))
+                         (V.drop 2 (indexedOuter <> indexedOuter)))
       angleAgainst x =
         dot (V2 1 0) .
         subtract x
@@ -80,9 +79,7 @@ makeSimple inner outer =
         V.minimumBy
           (\(_,(_,a),_) (_,(_,b),_) ->
              foldMap (\f -> f a b)
-                     (comparing (angleAgainst m) :
-                      comparing (qd m) :
-                      []))
+                     [comparing (angleAgainst m), comparing (qd m)])
           containing
       splitOuter
       -- | nearZero (i - start) = error "makeSimple: startIndex"
@@ -112,7 +109,7 @@ triangulate = collapseAndTriangulate
           | V.length s < 3 = empty
           | otherwise =
             do (v0@(n0,_),(n1,_),v2@(n2,_),others) <- takeFirst isEar (separate s)
-               [n0,n2,n1] <>
+               V.fromList [n0,n2,n1] <>
                  go (v0 `V.cons`
                      (v2 `V.cons` others))
         takeFirst f =
@@ -129,7 +126,7 @@ triangulate = collapseAndTriangulate
                                  not (nearZero (c - v)))
                               otherVertices)
           in area > 0 && not containsOther
-        addIndices vertices = V.imap (,) vertices
+        addIndices = V.imap (,)
         separate vertices =
           let n = V.length vertices
               doubleVerts = vertices <> vertices

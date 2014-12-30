@@ -49,7 +49,7 @@ testWorld =
                                      (\(s1 ::: s2 ::: TNil) ->
                                         World [s1,s2]
                                               [Wall v1 v2 (WallFace s1 Nothing Nothing (Just wt)) Nothing
-                                              ,Wall v2 v3 (WallFace s1 (Just lt) (Just wt) (Just wt))
+                                              ,Wall v2 v3 (WallFace s1 (Just lt) (Just wt) (Just lt))
                                                           (Just (WallFace s2 Nothing Nothing Nothing))
                                               ,Wall v3 v4 (WallFace s1 Nothing Nothing (Just wt)) Nothing
                                               ,Wall v4 v5 (WallFace s1 Nothing Nothing (Just wt)) Nothing

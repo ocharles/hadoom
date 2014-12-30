@@ -1,5 +1,4 @@
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE RecordWildCards #-}
 module Shader where
 
 import Prelude hiding (any, floor, ceiling)

@@ -116,12 +116,12 @@ compile (PWorld levelExpr) = go levelExpr
           GLTexture <$>
           loadTexture path colorSpace
         go (Hadoom.World.Material mkDiffuse mkNormals) =
-          do GLMaterial <$>
-               (Material.Material <$>
-                ((\(GLTexture t) -> t) <$>
-                 go mkDiffuse) <*>
-                ((\(Just (GLTexture t)) -> t) <$>
-                 traverse go mkNormals))
+          GLMaterial <$>
+            (Material.Material <$>
+             ((\(GLTexture t) -> t) <$>
+              go mkDiffuse) <*>
+             ((\(Just (GLTexture t)) -> t) <$>
+              traverse go mkNormals))
         go (World mkSectors mkWalls) =
           do sectors <- traverse (go >=> \(GLSector s) -> return s) mkSectors
              walls <- traverse (go >=> \(GLWall w) -> return w) mkWalls
@@ -187,7 +187,7 @@ compile (PWorld levelExpr) = go levelExpr
                                V.fromList [h V.! 0,h V.! 2,h V.! 1] V.++
                                reverseTriangles t
                            _ -> mempty
-                   in V.map (+ (fromIntegral (length floorVertices)))
+                   in V.map (+ fromIntegral (length floorVertices))
                             (reverseTriangles floorIndices)
                  indices = floorIndices <> ceilingIndices
                  iboSize =

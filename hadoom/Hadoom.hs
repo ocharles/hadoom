@@ -220,24 +220,24 @@ renderLightDepthTexture l t1 t2 =
              glDrawArrays GL_TRIANGLES 0 3
              id %= swap
         satPasses =
-          do do p <- lift (use satProgram)
-                glUseProgram (unGLProgram p)
-                let satPass i =
-                      do setUniform p
-                                    "jump"
-                                    (2 ^ i :: GLint)
-                         fullscreenQuad
-                    n =
-                      ceiling (logBase 2 (fromIntegral shadowMapResolution) :: Float)
-                setUniform p
-                           "pixelSize"
-                           (1.0 / fromIntegral shadowMapResolution :: GLfloat)
-                forM_ [V2 1 0,V2 0 1] $
-                  \satBasis ->
-                    do setUniform p
-                                  "basis"
-                                  (satBasis :: V2 GLfloat)
-                       mapM_ satPass [0 .. n :: Int]
+          do p <- lift (use satProgram)
+             glUseProgram (unGLProgram p)
+             let satPass i =
+                   do setUniform p
+                                 "jump"
+                                 (2 ^ i :: GLint)
+                      fullscreenQuad
+                 n =
+                   ceiling (logBase 2 (fromIntegral shadowMapResolution) :: Float)
+             setUniform p
+                        "pixelSize"
+                        (1.0 / fromIntegral shadowMapResolution :: GLfloat)
+             forM_ [V2 1 0,V2 0 1] $
+               \satBasis ->
+                 do setUniform p
+                               "basis"
+                               (satBasis :: V2 GLfloat)
+                    mapM_ satPass [0 .. n :: Int]
         computeSummedAreaTable =
           do glBindVertexArray =<< view nullVao
              glActiveTexture GL_TEXTURE0
@@ -303,10 +303,10 @@ renderFromCamera lights =
                use lightsUBO
              liftIO (with l
                           (\ptr ->
-                             do glBufferData GL_UNIFORM_BUFFER
-                                             (fromIntegral (sizeOf (undefined :: Light)))
-                                             (castPtr ptr)
-                                             GL_STREAM_DRAW))
+                             glBufferData GL_UNIFORM_BUFFER
+                                          (fromIntegral (sizeOf (undefined :: Light)))
+                                          (castPtr ptr)
+                                          GL_STREAM_DRAW))
              liftIO . drawWorldTextured =<< view world
 
 --------------------------------------------------------------------------------

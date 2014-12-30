@@ -68,17 +68,17 @@ loadTexture path colorSpace =
                       JP.convertPixel :: JP.PixelYCbCr8 -> JP.PixelRGB8
                 in case JP.pixelMap toRgb8 img of
                      JP.Image _ _ d ->
-                       do SV.unsafeWith
-                            d
-                            (glTexSubImage2D GL_TEXTURE_2D
-                                             0
-                                             0
-                                             0
-                                             width
-                                             height
-                                             GL_RGB
-                                             GL_UNSIGNED_BYTE .
-                             castPtr)
+                       SV.unsafeWith
+                         d
+                         (glTexSubImage2D GL_TEXTURE_2D
+                                          0
+                                          0
+                                          0
+                                          width
+                                          height
+                                          GL_RGB
+                                          GL_UNSIGNED_BYTE .
+                          castPtr)
               _ -> error "Unknown image format"
             glGenerateMipmap GL_TEXTURE_2D
             when gl_EXT_texture_filter_anisotropic

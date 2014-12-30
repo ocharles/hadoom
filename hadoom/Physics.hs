@@ -104,7 +104,6 @@ keyHeld scancode =
 hasScancode :: [SDL.Event] -> SDL.Scancode -> Bool
 events `hasScancode` s =
   case events of
-    (SDL.Event _ (SDL.KeyboardEvent{..})):xs -> SDL.keysymScancode keyboardEventKeysym ==
-                                                  s || xs `hasScancode` s
+    SDL.Event _ (SDL.KeyboardEvent{..}):xs -> SDL.keysymScancode keyboardEventKeysym == s || xs `hasScancode` s
     _:xs -> xs `hasScancode` s
     [] -> False

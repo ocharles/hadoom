@@ -91,5 +91,5 @@ letrec :: (TList (WorldExpr f) ts -> TList (WorldExpr f) ts)
        -> (TList (WorldExpr f) ts -> WorldExpr f t)
        -> WorldExpr f t
 letrec es e =
-  Let (\xs -> es (tmap Var xs))
-      (\xs -> e (tmap Var xs))
+  Let (es . tmap Var)
+      (e . tmap Var)
