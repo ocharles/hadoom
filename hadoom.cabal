@@ -40,7 +40,6 @@ Library
   default-extensions:
     NoImplicitPrelude
   exposed-modules:
-    Control.Wire.Profunctor
     Data.TList
     Hadoom
     Hadoom.Camera

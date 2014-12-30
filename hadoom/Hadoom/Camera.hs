@@ -2,14 +2,13 @@
 {-# LANGUAGE ViewPatterns #-}
 module Hadoom.Camera (Camera(..), camera, cameraQuat, cameraForward) where
 
-import Data.Profunctor
 import Control.Applicative
 import Control.Category
-import FRP.Netwire.Move (integral)
 import Control.Lens (alaf)
-import Control.Wire.Profunctor ()
 import Data.Foldable
 import Data.Monoid
+import Data.Profunctor
+import FRP.Netwire.Move (integral)
 import Linear
 import Prelude hiding ((.), id)
 import qualified SDL
