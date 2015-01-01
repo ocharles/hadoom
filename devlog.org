@@ -225,3 +225,42 @@ lights. The moment the light size is increased, the scene rapidly becomes noise.
 
 I think I'm probably going to have to go with summed area tiles, or some other
 derivative scheme.
+
+* <2015-01-01 Thu>
+
+Lots of progress to report! I decided that shadow mapping was beginning to just
+get in the way of actual progress, so I've just stopped focussing on that
+entirely. I'm not sure what state it is in, but the knowledge is there to get it
+how I want, so I can always revisit that. Dropping this allowed me to consider
+what should come next.
+
+First up, level representations. I revived my old `Level.hs` code, where I was
+experimenting with PHOAS and the work described in "Abstract Syntax Graphs for
+DSLs". I liked this approach, and built a compiler from these world
+specifications to OpenGL resources. I'm not really doing any rewriting or
+anything that you could do with a DSL, but it's been a fairly pleasent
+experience otherwise.
+
+With the level now described by the DSL, I finally started working on lines
+between sectors. I now have a way to join two sectors with a line segment that
+has a no main wall texture, but does have an upper/lower texture. This allows
+joining sectors of different floor or ceiling heights. I've also now got the
+ability to have the mid texture span less than the entire size of the wall,
+which is allowing me to build doors.
+
+Once I got the DSL working and had the ability to join varying height sectors, I
+had some fun defining a new test level. I found a really nice high resolution
+Doom texture pack, so I threw something together that features walls and a Doom
+bigdoor. It's quite exciting seeing this pet project actually look like Doom.
+
+Today I decided that I really needed to get on with collision detection, so I
+rolled my sleeves up and got on with it. I refined the line-segment intersection
+test, can now build 2D BSP trees, can compile levels to BSP trees, and have
+integrated BSP tree collision testing into the FRP physics network. It still
+needs a proper collision *response*, as right now you are simply denied the
+ability to move if you touch a wall.
+
+I'd like to build some more complex levels soon to do things like water
+rendering, but that's really going to need my level editor to work. I think I'm
+going to give up with a scrollable widget in GTK and just use a mouse button to
+drag the view around.
