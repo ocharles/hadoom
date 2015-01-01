@@ -47,6 +47,8 @@ Library
     Hadoom.GL.World
     Hadoom.Geometry
     Hadoom.World
+    Hadoom.WorldBSP
+    Hadoom.BSP
     Light
     Material
     Physics

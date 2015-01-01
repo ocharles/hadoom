@@ -1,22 +1,26 @@
-
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE MultiWayIf #-}
 module Hadoom.Geometry where
 
-import Control.Applicative
-import Control.Category
+import BasePrelude
 import Control.Lens hiding (indices)
-import Data.Foldable (any, foldMap)
-import Data.Function (on)
-import Data.Monoid ((<>))
 import Data.Ord (comparing)
 import Linear as L hiding (outer)
-import Prelude hiding (any, floor, ceiling, (.), id)
 import qualified Data.Vector as V
 
-rayLineIntersection :: (Epsilon a,Fractional a,Ord a)
-                    => V2 a -> V2 a -> V2 a -> V2 a -> Maybe (V2 a)
-rayLineIntersection p r q q' =
-  let s = q' - q
+data LineSegment a =
+  LineSegment {start :: V2 a
+              ,end :: V2 a}
+  deriving (Eq,Ord,Read,Show)
+
+-- | Given two line segments, find the point of intersection on the first line
+-- that intersects with the second line. If the lines do not cross or are
+-- coincident, then 'Nothing' is returned.
+lineLineIntersection :: (Epsilon a,Fractional a,Ord a)
+                    => LineSegment a -> LineSegment a -> Maybe (V2 a)
+lineLineIntersection (LineSegment p p') (LineSegment q q') =
+  let r = p' - p
+      s = q' - q
       cross2 (V2 a b) (V2 x y) = a * y - b * x
       pToQ = q - p
       tNum = pToQ `cross2` s
@@ -27,9 +31,27 @@ rayLineIntersection p r q q' =
          | otherwise ->
            let u = uNum / denom
                t = tNum / denom
-           in if 0 <= u && u <= 1
+           in if (0 <= t && t <= 1) && (0 <= u && u <= 1)
                  then Just (p + r ^* t)
                  else Nothing
+
+-- | Determine which side of a line a point lies. If the point is on the line
+-- (or extremely close to being so, as defined by 'Epsilon'), then return that
+-- information.
+lineSide :: (Epsilon a,Ord a)
+         => LineSegment a -> V2 a -> LineSide
+lineSide (LineSegment (V2 ax ay) (V2 bx by)) (V2 x y) =
+  let p = (bx - ax) * (y - ay) - (by - ay) * (x - ax)
+  in if | nearZero p -> OnLine
+        | p > 0 -> LeftSide
+        | p < 0 -> RightSide
+
+data LineSide
+  = LeftSide
+  | RightSide
+  | OnLine
+  deriving (Eq,Ord,Read,Show,Enum,Bounded)
+
 
 makeSimple :: (Epsilon a,Fractional a,Ord a)
            => V.Vector (V2 a) -> V.Vector (V2 a) -> V.Vector (V2 a)
@@ -43,14 +65,12 @@ makeSimple inner outer =
               (V.tail indexedOuter <> indexedOuter)
       intersections =
         V.map (\(s@(_,start_),e@(_,end_)) ->
-                 (rayLineIntersection m
-                                      (V2 1 0)
-                                      start_
-                                      end_
+                 (lineLineIntersection (LineSegment m (V2 1 0))
+                                       (LineSegment start_ end_)
                  ,s
                  ,e))
               edges
-      (Just i,start,end) =
+      (Just i,lStart,lEnd) =
         V.minimumBy
           (\(x,_,_) (y,_,_) ->
              case (x,y) of
@@ -62,7 +82,7 @@ makeSimple inner outer =
           intersections
       (pIndex,p) =
         V.maximumBy (xMost `on` snd)
-                    (V.fromList [start,end])
+                    (V.fromList [lStart,lEnd])
       containing =
         V.filter (\((_,a),(j,b),(_,c)) ->
                     j /= pIndex &&
@@ -79,7 +99,7 @@ makeSimple inner outer =
         V.minimumBy
           (\(_,(_,a),_) (_,(_,b),_) ->
              foldMap (\f -> f a b)
-                     [comparing (angleAgainst m), comparing (qd m)])
+                     [comparing (angleAgainst m),comparing (qd m)])
           containing
       splitOuter
       -- | nearZero (i - start) = error "makeSimple: startIndex"
@@ -147,9 +167,29 @@ triangleArea a b c =
                   (toV3 c))
   in 0.5 * det
 
+data Circle a =
+  Circle {circleCenter :: V2 a
+         ,circleRadius :: a}
+  deriving (Eq,Ord,Read,Show)
+
 pointInTriangle :: (Epsilon a, Fractional a, Ord a) => V2 a -> V2 a -> V2 a -> V2 a -> Bool
 pointInTriangle p0@(V2 p0x p0y) p1@(V2 p1x p1y) p2@(V2 p2x p2y) (V2 px py) =
   let area = triangleArea p0 p1 p2
       s = 1 / (2 * area) * (p0y * p2x - p0x * p2y + (p2y - p0y) * px + (p0x - p2x) * py)
       t = 1 / (2 * area) * (p0x * p1y - p0y * p1x + (p0y - p1y) * px + (p1x - p0x) * py)
   in (s > 0 || nearZero s) && (t > 0 || nearZero t) && ((1 - s - t) > 0 || nearZero (1 - s - t))
+
+-- https://stackoverflow.com/questions/1073336/circle-line-segment-collision-detection-algorithm
+circleLineSegmentIntersection :: (Floating a, Ord a) => Circle a -> LineSegment a -> Bool
+circleLineSegmentIntersection (Circle x r) (LineSegment e l) =
+  let d = l - e
+      f = e - x
+      a = d `dot` d
+      b = 2 * (f `dot` d)
+      c = (f `dot` f) - (r * r)
+      disc = b * b - 4 * a * c
+      discRoot = sqrt disc
+      t1 = (negate b - discRoot) / (2 * a)
+      t2 = (negate b + discRoot) / (2 * a)
+  in if | disc < 0 -> False
+        | otherwise -> (t1 >= 0 && t1 <= 1) || (t2 >= 0 && t2 <= 1)

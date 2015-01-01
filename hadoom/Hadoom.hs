@@ -80,7 +80,7 @@ hadoom win =
                   (shaders <~ liftIO reloadShaders)
              let (out,w') =
                    runIdentity (stepWire w delta (Right events))
-             let (Scene viewMat lights) =
+                 (Scene viewMat lights) =
                    case out of
                      Right x -> x
                      Left () ->
