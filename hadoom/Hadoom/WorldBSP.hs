@@ -17,7 +17,7 @@ data V :: SceneElementType -> * where
   VLines :: [LineSegment Float] -> V a
 
 compileBSP :: PWorld TWorld -> BSP Float
-compileBSP = buildBsp . wallsOf
+compileBSP = buildBSP . wallsOf
 
 wallsOf :: PWorld TWorld -> [LineSegment Float]
 wallsOf (PWorld w) =

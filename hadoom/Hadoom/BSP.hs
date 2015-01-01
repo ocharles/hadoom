@@ -1,66 +1,100 @@
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-module Hadoom.BSP where
+module Hadoom.BSP (BSP(..), buildBSP, circleIntersects) where
 
-import BasePrelude hiding (lefts, rights, lines)
+import BasePrelude hiding (left, lefts, right, rights, lines)
 import Hadoom.Geometry
 import Linear
+import Data.List.NonEmpty (NonEmpty(..))
 
+-- | A binary space partition tree, where each node contains 1 or more
+-- coincident line segments (along the separating line), and a smaller BSP tree
+-- of line segments to the left, and line segments to the right.
 data BSP a
-  = Split (LineSegment a)
+  = Split (NonEmpty (LineSegment a))
           (BSP a)
           (BSP a)
   | Empty
   deriving (Eq,Ord,Read,Show)
 
-buildBsp :: (Epsilon a, Floating a, Fractional a, Num a, Ord a, Show a) => [LineSegment a] -> BSP a
-buildBsp [] = Empty
-buildBsp (split:lines) =
+-- | An internal structure to keep track of how a given line segment would
+-- partition other lines.
+data Split a =
+  MkSplit {lefts :: [LineSegment a]
+          ,rights :: [LineSegment a]
+          ,coincidents :: [LineSegment a]}
+  deriving (Eq,Ord,Show)
+
+left, right, coincident :: LineSegment a -> Split a
+left l = mempty { lefts = [l] }
+right l = mempty { rights = [l] }
+coincident l = mempty { coincidents = [l] }
+
+filterSplit :: (LineSegment a -> Bool) -> Split a -> Split a
+filterSplit f (MkSplit x y z) =
+  MkSplit (filter f x)
+          (filter f y)
+          (filter f z)
+
+instance Monoid (Split a) where
+  mempty = MkSplit mempty mempty mempty
+  (MkSplit x y z) `mappend` (MkSplit a b c) =
+    MkSplit (x <> a)
+            (y <> b)
+            (z <> c)
+
+-- | Build a 'BSP' out of a 'LineSegment' soup. Currently the first line segment
+-- will be taken as the root split.
+buildBSP :: (Epsilon a,Floating a,Fractional a,Num a,Ord a,Show a)
+         => [LineSegment a] -> BSP a
+buildBSP [] = Empty
+buildBSP (split:lines) =
   let splitLine l =
         let startSide = lineSide split (start l)
             endSide = lineSide split (end l)
         in case lineLineIntersection l split of
              Nothing ->
                case startSide of
-                 LeftSide -> [Left l]
-                 RightSide -> [Right l]
+                 LeftSide -> left l
+                 RightSide -> right l
                  _ ->
                    case endSide of
-                     LeftSide -> [Left l]
-                     RightSide -> [Right l]
-                     _ -> [Left l] -- The lines are coincident and non-overlapping. We'll arbitrarily bias to the left
+                     LeftSide -> left l
+                     RightSide -> right l
+                     _ -> coincident l
              Just p ->
                case startSide of
                  LeftSide ->
-                   [Left (LineSegment (start l) p)
-                   ,Right (LineSegment p (end l))]
+                   left (LineSegment (start l)
+                                     p) <>
+                   right (LineSegment p
+                                      (end l))
                  RightSide ->
-                   [Right (LineSegment (start l) p)
-                   ,Left (LineSegment p (end l))]
+                   right (LineSegment (start l)
+                                      p) <>
+                   left (LineSegment p
+                                     (end l))
                  OnLine ->
                    case lineSide split (end l) of
-                     LeftSide -> [Left l]
-                     RightSide -> [Right l]
-                     _ ->
-                       error ("buildBsp: Cannot split coincident lines: " ++
-                              show l ++ show split)
-      approximatesPoint (LineSegment a b) = nearZero (norm (a - b))
-      splitLines = filter (not . (either approximatesPoint approximatesPoint)) (concatMap splitLine lines)
-      (lefts,rights) = partitionEithers splitLines
-  in Split split
-           (buildBsp lefts)
-           (buildBsp rights)
+                     LeftSide -> left l
+                     RightSide -> right l
+                     _ -> coincident l
+      approximatesPoint (LineSegment a b) =
+        nearZero (norm (a - b))
+      splits =
+        filterSplit (not . approximatesPoint)
+                    (foldMap splitLine lines)
+  in Split (split :| coincidents splits)
+           (buildBSP (lefts splits))
+           (buildBSP (rights splits))
 
-printIndented :: Show a => BSP a -> String
-printIndented = go 0
-  where go n Empty = replicate n ' ' <> ".\n"
-        go n (Split s l r) = replicate n ' ' <> show s <> "\n" <> go (succ n) l <> go (succ n) r
-
+-- | Determine if a 'Circle' intersects a 'BSP' tree.
 circleIntersects :: (Epsilon a, Floating a, Ord a) => BSP a -> Circle a -> Bool
 circleIntersects Empty _ = False
-circleIntersects (Split split l r) c
-  | circleLineSegmentIntersection c split = True
-  | otherwise = case lineSide split (circleCenter c) of
-                  LeftSide -> circleIntersects l c
-                  RightSide -> circleIntersects r c
-                  OnLine -> True
+circleIntersects (Split cs@(split :| _) l r) c
+  | any (circleLineSegmentIntersection c) cs = True -- TODO Optimize with a ray-circle intersection
+  | otherwise =
+    case lineSide split (circleCenter c) of
+      LeftSide -> circleIntersects l c
+      RightSide -> circleIntersects r c
+      OnLine -> True
