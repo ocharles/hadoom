@@ -62,40 +62,54 @@ scene =
 worldCamera :: (Applicative m, HasTime t s, MonadFix m, Monoid e) => Wire s e m [SDL.Event] (M44 CFloat)
 worldCamera =
   let c = camera
-      speedFromKey s scancode = bool 0 s <$> keyHeld scancode
-      forwardV = cameraForward <$> c
-      strafeV = (fromQuaternion (axisAngle (V3 0 1 0) (pi / 2)) !*) <$> forwardV
-      forwardSpeed =
-        (+) <$>
-        speedFromKey 10 SDL.ScancodeW <*>
-        speedFromKey (-10) SDL.ScancodeS
-      forwardMotion = (^*) <$> forwardV <*> forwardSpeed
-      strafeSpeed =
-        (+) <$>
-        speedFromKey 3 SDL.ScancodeA <*>
-        speedFromKey (-3) SDL.ScancodeD
-      strafeMotion = (^*) <$> strafeV <*> strafeSpeed
+      speedFromKey s scancode =
+        bool 0 s <$>
+        keyHeld scancode
+      forwardMotion =
+        let forwardV = cameraForward <$> c
+            forwardSpeed =
+              (+) <$>
+              speedFromKey 3 SDL.ScancodeW <*>
+              speedFromKey (-3)
+                           SDL.ScancodeS
+        in (^*) <$> forwardV <*> forwardSpeed
+      strafeMotion =
+        let strafeV =
+              (fromQuaternion
+                 (axisAngle (V3 0 1 0)
+                            (pi / 2)) !*) <$>
+              forwardV
+            strafeSpeed =
+              (+) <$>
+              speedFromKey 2 SDL.ScancodeA <*>
+              speedFromKey (-2)
+                           SDL.ScancodeD
+        in (^*) <$> strafeV <*> strafeSpeed
       worldBSP = compileBSP testWorld
-      translation2D = (+) <$> integralSatisfying noCollisions 0 . forwardMotion
-                          <*> integralSatisfying noCollisions 0 . strafeMotion
+      translation2D =
+        integralSatisfying noCollisions 0 .
+        ((+) <$> forwardMotion <*> strafeMotion)
       playerRadius = 0.4
-      noCollisions p = not (circleIntersects worldBSP (Circle (realToFrac <$> p ^. _xz) playerRadius))
-  in set translation
-       <$> ((+) <$> pure (V3 0 1.75 0)
-                <*> translation2D)
-       <*> (m33_to_m44 . fromQuaternion . cameraQuat <$> c)
+      noCollisions p =
+        not (circleIntersects worldBSP
+                              (Circle (realToFrac <$> p ^. _xz) playerRadius))
+      headPosition = V3 0 1.75 0
+  in set translation <$>
+     ((+) <$> pure headPosition <*> translation2D) <*>
+     (m33_to_m44 . fromQuaternion . cameraQuat <$> c)
 
 integralSatisfying :: (Fractional a,HasTime t s)
                    => (a -> Bool) -> a -> Wire s e m a a
 integralSatisfying satisfies = loop
   where loop x' =
-          mkPure $
-          \ds dx ->
-            let dt = realToFrac (dtime ds)
-                x = x' + dt * dx
-            in if satisfies x
-                 then (Right x',loop x)
-                 else (Right x',loop x')
+          mkPure (\ds dx ->
+                    let dt =
+                          realToFrac (dtime ds)
+                        x = x' + dt * dx
+                    in (Right x'
+                       ,if satisfies x
+                           then loop x
+                           else loop x'))
 
 keyPressed :: (Applicative m,Monoid e,MonadFix m)
            => SDL.Scancode -> Wire s e m [SDL.Event] (Event ())
