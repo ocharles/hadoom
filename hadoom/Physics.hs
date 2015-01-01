@@ -65,9 +65,9 @@ worldCamera =
       speedFromKey s scancode =
         bool 0 s <$>
         keyHeld scancode
+      forwardV = cameraForward <$> c
       forwardMotion =
-        let forwardV = cameraForward <$> c
-            forwardSpeed =
+        let forwardSpeed =
               (+) <$>
               speedFromKey 3 SDL.ScancodeW <*>
               speedFromKey (-3)
