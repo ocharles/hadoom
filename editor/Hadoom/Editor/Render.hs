@@ -23,10 +23,9 @@ renderVertex = D.lw D.none (D.square (1 / 10))
 renderEditor :: EditorState -> D.Diagram Cairo.Cairo D.R2
 renderEditor EditorState{..} =
   let P (V2 mouseX mouseY) = esMousePosition
-  in mconcat [
-                   D.fc D.white
-                         (D.translate (pointToR2 esMousePosition)
-                                      renderVertex)
+  in mconcat [D.fc D.white
+                   (D.translate (pointToR2 esMousePosition)
+                                renderVertex)
              ,foldMap (D.lc D.white .
                        D.lwO 2 .
                        renderSector)
@@ -55,7 +54,7 @@ renderEditor EditorState{..} =
              ,gridLines esHalfExtents]
 
 renderSector :: NonEmpty (Point V2 Double) -> D.Diagram Cairo.Cairo D.R2
-renderSector vertices = renderVertices <> renderWallFacing <> renderWalls
+renderSector vertices = renderVertices <> renderWalls
   where renderWalls =
           D.strokeLocLoop
             (D.mapLoc D.closeLine
@@ -83,8 +82,8 @@ gridLines (V2 gridHalfWidth gridHalfHeight) =
                            (D.strokeLine
                               (D.lineFromVertices [D.p2 (0,0),D.p2 (1,0)])))
         gridLinesIn x y =
-          D.dashingG
-            [1 / 20,1 / 20]
+          D.dashingO
+            [1,1]
             0
             (foldMap (\n ->
                         D.opacity (0.5 +
