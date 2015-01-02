@@ -1,335 +1,324 @@
 {-# LANGUAGE RecordWildCards #-}
-module Main where
+module Main (main) where
 
 import Control.Applicative
-import Control.Lens ((<&>))
+import Control.Lens ((^.))
 import Control.Monad
 import Control.Monad.Trans (liftIO)
 import Data.Foldable (foldMap)
+import Data.IORef
 import Data.Monoid
+import Linear
+import Linear.Affine
 import Reactive.Banana ((<@), (<@>))
-
-import qualified Hadoom
-
-import qualified Graphics.UI.Gtk as GTK
-import qualified Diagrams.Prelude as Diagrams
-import qualified Diagrams.Backend.Cairo as Diagrams
+import qualified Diagrams.Backend.Cairo as D
 import qualified Diagrams.Backend.Cairo.Internal as Cairo
-import qualified DiagramsGtk as Diagrams
+import qualified Diagrams.Prelude as D
+import qualified Graphics.UI.Gtk as GTK
 import qualified Reactive.Banana as RB
 import qualified Reactive.Banana.Frameworks as RB
 
+pointToP2 :: Point V2 Double -> D.P2
+pointToP2 (P (V2 x y)) = D.p2 (x,y)
+
+outputSize :: Num a => V2 a
+outputSize =
+  V2 gridHalfWidth gridHalfHeight ^*
+  (2 * 25)
+
 main :: IO ()
-main = do
-  _ <- GTK.initGUI
+main =
+  do _ <- GTK.initGUI
+     w <- GTK.windowNew
+     _ <- GTK.on w GTK.destroyEvent (False <$ liftIO GTK.mainQuit)
+     adj <- GTK.adjustmentNew 1000 0 500 1 5 10
+     vp <- GTK.viewportNew adj adj
+     s <- GTK.scrolledWindowNew Nothing Nothing
+     da <- GTK.drawingAreaNew
+     GTK.widgetAddEvents
+       da
+       [GTK.PointerMotionMask
+       ,GTK.PointerMotionHintMask
+       ,GTK.ButtonMotionMask
+       ,GTK.ButtonPressMask]
+     GTK.widgetSetSizeRequest da
+                              (outputSize ^. _x)
+                              (outputSize ^. _y)
+     GTK.containerAdd s da
+     GTK.widgetShow da
+     GTK.containerAdd vp s
+     GTK.widgetShow s
+     GTK.containerAdd w vp
+     GTK.widgetShow vp
+     GTK.widgetShow w
+     gui <- HadoomGUI w <$>
+            newIORef mempty <*>
+            pure da
+     RB.compile (hadoomEditorNetwork gui) >>=
+       RB.actuate
+     _ <- GTK.on da
+                 GTK.draw
+                 (do d <- liftIO (readIORef (outRef gui))
+                     snd (D.renderDia
+                            Cairo.Cairo
+                            (Cairo.CairoOptions
+                               ""
+                               (D.Dims (outputSize ^. _x)
+                                       (outputSize ^. _y))
+                               Cairo.RenderOnly
+                               False)
+                            (D.bg D.black d)))
+     GTK.mainGUI
 
-  builder <- GTK.builderNew
-  GTK.builderAddFromFile builder "editor/editor.glade"
-  w <- GTK.builderGetObject builder GTK.castToWindow "applicationwindow1"
-  GTK.widgetShow w
+data HadoomGUI =
+  HadoomGUI {appWindow :: GTK.Window
+            ,outRef :: IORef (D.Diagram D.Cairo D.R2)
+            ,guiMap :: GTK.DrawingArea}
 
-  layout <- GTK.builderGetObject builder GTK.castToLayout "layout1"
-  GTK.widgetAddEvents
-    layout
-    [GTK.PointerMotionMask
-    ,GTK.PointerMotionHintMask
-    ,GTK.ButtonMotionMask
-    ,GTK.ButtonPressMask]
+-- data HadoomGUI = HadoomGUI
+--   { guiMap :: GTK.Layout
+--   , guiWallTexture :: GTK.EventBox
+--   , guiWallTextureImage :: GTK.Image
+--   , guiTest :: GTK.ToolButton
+--   }
 
-  gui <- HadoomGUI <$> pure layout
-                  <*> GTK.builderGetObject builder GTK.castToEventBox "eventbox1"
-                  <*> GTK.builderGetObject builder GTK.castToImage "image1"
-                  <*> GTK.builderGetObject builder GTK.castToToolButton "toolbutton1"
-  RB.compile (hadoomEditorNetwork w gui) >>= RB.actuate
-  GTK.mainGUI
-
-data HadoomGUI = HadoomGUI
-  { guiMap :: GTK.Layout
-  , guiWallTexture :: GTK.EventBox
-  , guiWallTextureImage :: GTK.Image
-  , guiTest :: GTK.ToolButton
-  }
-
-type Vertex = (Double, Double)
-
-data SectorBuilder = SectorBuilder
-  { sbInProgress :: Maybe (Vertex, [Vertex])
-  , sbComplete :: [[Vertex]]
-  }
+data SectorBuilder =
+  SectorBuilder {sbInProgress :: Maybe (Point V2 Double,[Point V2 Double])
+                ,sbComplete :: [[Point V2 Double]]}
 
 emptySectorBuilder :: SectorBuilder
 emptySectorBuilder = SectorBuilder Nothing []
 
-updateSectorBuilder :: Vertex -> SectorBuilder -> SectorBuilder
+updateSectorBuilder :: Point V2 Double -> SectorBuilder -> SectorBuilder
 updateSectorBuilder coords sb =
   case sbInProgress sb of
     Nothing ->
-      sb {sbInProgress = Just (coords, [])}
-
+      sb {sbInProgress = Just (coords,[])}
     Just (initialPoint,ps)
       | coords /= initialPoint ->
         sb {sbInProgress =
-                Just (initialPoint
-                     ,coords : ps)}
+              Just (initialPoint,coords : ps)}
       | otherwise ->
-        sb {sbInProgress =
-                Nothing
+        sb {sbInProgress = Nothing
            ,sbComplete =
-                (initialPoint : reverse ps) :
-                sbComplete sb}
+              (initialPoint : reverse ps) :
+              sbComplete sb}
 
-visualizeMap :: Vertex -> SectorBuilder -> Maybe [Vertex] -> Maybe [Vertex] -> Diagrams.Diagram Cairo.Cairo Diagrams.R2
-visualizeMap (mouseX,mouseY) sb overSector selectedSector =
-  mconcat [Diagrams.fc
-             Diagrams.red
-             (Diagrams.translate
-                (Diagrams.r2
-                   (mouseX
-                   ,mouseY))
-                (Diagrams.square (1 / 5)))
-          ,foldMap (Diagrams.lc Diagrams.white .
-                    Diagrams.lwO 2 .
+visualizeMap :: Point V2 Double
+             -> SectorBuilder
+             -> Maybe [Point V2 Double]
+             -> Maybe [Point V2 Double]
+             -> D.Diagram Cairo.Cairo D.R2
+visualizeMap (P (V2 mouseX mouseY)) sb overSector selectedSector =
+  mconcat [D.lw D.none
+                (D.fc D.red
+                      (D.translate (D.r2 (mouseX,mouseY))
+                                   (D.square (1 / 5))))
+          ,foldMap (D.lc D.white .
+                    D.lwO 2 .
                     sectorDiagram)
                    (sbComplete sb)
-          ,foldMap (Diagrams.fc Diagrams.red . sectorDiagram) overSector
-          ,foldMap (Diagrams.fc Diagrams.white . sectorDiagram) selectedSector
+          ,foldMap (D.fc D.red . sectorDiagram) overSector
+          ,foldMap (D.fc D.white . sectorDiagram) selectedSector
           ,case sbInProgress sb of
              Just (initialPoint,vertices) ->
-               Diagrams.lc Diagrams.green $
-               Diagrams.lwO 2 $
-               Diagrams.strokeLocLine $
-               Diagrams.fromVertices $
-               map Diagrams.p2
-                   (initialPoint :
-                    reverse ((mouseX
-                             ,mouseY) :
-                             vertices))
-
-             Nothing ->
-               mempty
+               D.lc D.green
+                    (D.lwO 2
+                           (D.strokeLocLine
+                              (D.fromVertices
+                                 (map pointToP2
+                                      (initialPoint :
+                                       reverse (P (V2 mouseX mouseY) :
+                                                vertices))))))
+             Nothing -> mempty
           ,gridLines]
 
-sectorDiagram :: [Vertex] -> Diagrams.Diagram Cairo.Cairo Diagrams.R2
-sectorDiagram = Diagrams.strokeLocLoop . Diagrams.mapLoc Diagrams.closeLine .
-                Diagrams.fromVertices . map Diagrams.p2
+sectorDiagram :: [Point V2 Double] -> D.Diagram Cairo.Cairo D.R2
+sectorDiagram =
+  D.strokeLocLoop .
+  D.mapLoc D.closeLine .
+  D.fromVertices .
+  map (\(P (V2 x y)) -> D.p2 (x,y))
 
-hadoomEditorNetwork :: RB.Frameworks t => GTK.Window -> HadoomGUI -> RB.Moment t ()
-hadoomEditorNetwork w HadoomGUI{..} = do
-  widgetExposed <-
-     RB.fromAddHandler $ RB.AddHandler $ \h ->
-       fmap GTK.signalDisconnect $
-       GTK.on guiMap GTK.draw $
-         liftIO (h ())
+registerDestroy :: (RB.Frameworks t,GTK.WidgetClass w)
+                => w -> RB.Moment t (RB.Event t ())
+registerDestroy widget =
+  RB.fromAddHandler
+    (RB.AddHandler
+       (\h ->
+          fmap GTK.signalDisconnect
+               (GTK.on widget
+                       GTK.destroyEvent
+                       (False <$
+                        liftIO (h ())))))
 
-  mainWindowClosed <-
-    RB.fromAddHandler $ RB.AddHandler $ \h ->
-    fmap GTK.signalDisconnect $
-    GTK.on w GTK.destroyEvent $
-    False <$ liftIO (h ())
+registerMotionNotify :: (RB.Frameworks t,GTK.WidgetClass w)
+                     => w -> RB.Moment t (RB.Event t (Point V2 Double))
+registerMotionNotify widget =
+  RB.fromAddHandler
+    (withEvent (GTK.on widget GTK.motionNotifyEvent)
+               (\h ->
+                  do (x,y) <- GTK.eventCoordinates
+                     False <$
+                       liftIO (h (P (V2 x y)))))
 
-  drawableAreaResized <-
-    RB.fromAddHandler $ RB.AddHandler $ \h ->
-      fmap GTK.signalDisconnect $
-      GTK.on guiMap GTK.sizeAllocate $
-      \(GTK.Rectangle _ _ wi hi) -> h (wi,hi)
+registerMouseClicked :: (RB.Frameworks t,GTK.WidgetClass w)
+                     => w -> RB.Moment t (RB.Event t GTK.MouseButton)
+registerMouseClicked widget =
+  RB.fromAddHandler
+    (RB.AddHandler
+       (\h ->
+          fmap GTK.signalDisconnect
+               (GTK.on widget
+                       GTK.buttonPressEvent
+                       (do button <- GTK.eventButton
+                           False <$
+                             liftIO (h button)))))
 
-  mouseMoved <-
-    RB.fromAddHandler $
-      withEvent (GTK.on guiMap GTK.motionNotifyEvent) $ \h ->
-        False <$ (GTK.eventCoordinates >>= liftIO . h)
+hadoomEditorNetwork :: RB.Frameworks t
+                    => HadoomGUI -> RB.Moment t ()
+hadoomEditorNetwork HadoomGUI{..} =
+  do mainWindowClosed <- registerDestroy appWindow
+     mouseMoved <- registerMotionNotify guiMap
+     mouseClicked <- registerMouseClicked guiMap
+     let lmbClicked =
+           RB.filterE (== GTK.LeftButton) mouseClicked
+         rmbClicked =
+           RB.filterE (== GTK.RightButton) mouseClicked
+         zoomFactor = pure 10
+         widgetSize =
+           pure (outputSize :: V2 Double)
+         gridCoords =
+           RB.stepper 0
+                      (RB.filterJust (toGridCoords <$> widgetSize <@> mouseMoved))
+         sectorBuilderChanged =
+           RB.accumE emptySectorBuilder
+                     (updateSectorBuilder <$>
+                      (gridCoords <@ lmbClicked))
+         sectorBuilder =
+           RB.stepper emptySectorBuilder sectorBuilderChanged
+         overSector =
+           querySelected <$>
+           (sbComplete <$> sectorBuilder) <*>
+           (toDiagramCoords <$> widgetSize <*> zoomFactor <*>
+            RB.stepper 0 mouseMoved)
+         selectedSector =
+           RB.stepper Nothing
+                      (overSector <@ rmbClicked)
+         diagram = visualizeMap <$> gridCoords <*> sectorBuilder <*> overSector <*>
+                   selectedSector
+         shouldRedraw =
+           foldl1 RB.union [void mouseMoved,void mouseClicked]
+     diagramChanged <- RB.changes diagram
+     RB.reactimate'
+       (fmap (writeIORef outRef) <$>
+        diagramChanged)
+     RB.reactimate (GTK.widgetQueueDraw guiMap <$ shouldRedraw)
+     RB.reactimate (GTK.mainQuit <$ mainWindowClosed)
 
-  mouseClicked <-
-    RB.fromAddHandler $ RB.AddHandler $ \h ->
-      fmap GTK.signalDisconnect $
-      GTK.on guiMap GTK.buttonPressEvent $ do
-        button <- GTK.eventButton
-        False <$ liftIO (h button)
-
-  playHadoom <-
-    RB.fromAddHandler $ RB.AddHandler $ \h ->
-      fmap GTK.signalDisconnect $
-      GTK.onToolButtonClicked guiTest $ h ()
-
-  wallTextureDblClick <-
-    RB.fromAddHandler $ RB.AddHandler $ \h ->
-      fmap GTK.signalDisconnect $ GTK.on guiWallTexture GTK.buttonPressEvent $ do
-        click <- GTK.eventClick
-        False <$ when (click == GTK.DoubleClick) (liftIO $ h ())
-
-  let lmbClicked = RB.filterE (== GTK.LeftButton) mouseClicked
-      rmbClicked = RB.filterE (== GTK.RightButton) mouseClicked
-
-      zoomFactor = pure 0.1
-
-      widgetSize =
-        RB.stepper (100,100) drawableAreaResized
-
-      gridCoords =
-        RB.stepper (0,0) . RB.filterJust $
-          toGridCoords <$> widgetSize <@> mouseMoved
-
-      sectorBuilderChanged =
-        RB.accumE emptySectorBuilder
-                  (updateSectorBuilder <$>
-                   (gridCoords <@ lmbClicked))
-
-      sectorBuilder =
-        RB.stepper emptySectorBuilder sectorBuilderChanged
-
-      overSector =
-        querySelected
-          <$> (sbComplete <$> sectorBuilder)
-          <*> (toDiagramCoords <$> widgetSize <*> zoomFactor <*> RB.stepper (0,0) mouseMoved)
-
-      selectedSector = RB.stepper Nothing (overSector <@ rmbClicked)
-
-      renderChanged =
-        (visualizeMap <$> gridCoords <*> sectorBuilder <*> overSector <*> selectedSector) <@ widgetExposed
-
-      shouldRedraw = foldl1 RB.union [ void mouseMoved, void mouseClicked ]
-
-  wallTextureChanged <- fmap RB.filterJust $ RB.execute $ wallTextureDblClick <&> \_ -> RB.FrameworksMoment $ liftIO $ do
-    d <- GTK.fileChooserDialogNew (Nothing :: Maybe String)
-                                 Nothing GTK.FileChooserActionOpen
-                                 [("Cancel", GTK.ResponseCancel), ("Open", GTK.ResponseOk)]
-    r <- GTK.dialogRun d
-    fp <- GTK.fileChooserGetFilename d
-    GTK.widgetDestroy d
-    (guard (r == GTK.ResponseOk) *>) <$> return fp
-
-  let wallTexture = RB.stepper "test-texture.jpg" wallTextureChanged
-
-  RB.reactimate $
-   wallTextureChanged <&> \fp ->
-     GTK.imageSetFromFile guiWallTextureImage fp
-
-  RB.reactimate $
-    (Hadoom.testHadoom <$> (head . sbComplete <$> sectorBuilder)
-                       <*> wallTexture) <@ playHadoom
-
-  RB.reactimate $
-    GTK.widgetQueueDraw guiMap <$ shouldRedraw
-
-  RB.reactimate $
-    GTK.mainQuit <$ mainWindowClosed
-
-  RB.reactimate $
-    (((,) <$> zoomFactor) <@> renderChanged) <&> \(z,d) -> liftIO $
-      Diagrams.defaultRender guiMap $ Diagrams.bg Diagrams.black $
-      Diagrams.clipped (Diagrams.scale z $ Diagrams.square 100) $
-      d
-
-querySelected :: [[Vertex]] -> (Double, Double) -> Maybe [Vertex]
-querySelected sectors xy =
+querySelected :: [[Point V2 Double]]
+              -> Point V2 Double
+              -> Maybe [Point V2 Double]
+querySelected sectors (P (V2 x y)) =
   let sectorPaths =
         foldMap (\s ->
-                   Diagrams.value (First (Just s))
-                                  (sectorDiagram s))
+                   D.value (First (Just s))
+                           (sectorDiagram s))
                 sectors
-  in getFirst $
-     Diagrams.runQuery (Diagrams.query sectorPaths)
-                       (Diagrams.p2 xy)
+  in getFirst (D.runQuery (D.query sectorPaths)
+                          (D.p2 (x,y)))
 
-toDiagramCoords :: Integral a => (a, a) -> Double -> (Double, Double) -> (Double, Double)
-toDiagramCoords (w,h) zoom xy =
+toDiagramCoords :: V2 Double -> Double -> Point V2 Double -> Point V2 Double
+toDiagramCoords (V2 w h) zoom (P (V2 x y)) =
   let (_,t,_) =
-        Diagrams.adjustDia
+        D.adjustDia
           Cairo.Cairo
-          (Cairo.CairoOptions
-             ""
-             (Diagrams.Dims (fromIntegral w)
-                            (fromIntegral h))
-             Cairo.RenderOnly
-             False)
-          (Diagrams.clipped
-             (Diagrams.scale zoom $
-              Diagrams.square 100)
-             (Diagrams.square (2 * gridHalfWidth)) :: Diagrams.Diagram Cairo.Cairo Diagrams.R2)
-  in case Diagrams.coords
-            (Diagrams.papply (Diagrams.inv t)
-                             (Diagrams.p2 xy)) of
-       x' Diagrams.:& y' ->
-         (x'
-         ,y')
+          (Cairo.CairoOptions ""
+                              (D.Dims w h)
+                              Cairo.RenderOnly
+                              False)
+          (D.clipped (D.scale zoom (D.square 100))
+                     (D.square (2 * gridHalfWidth)) :: D.Diagram Cairo.Cairo D.R2)
+  in case D.coords (D.papply (D.inv t)
+                             (D.p2 (x,y))) of
+       x' D.:& y' -> P (V2 x' y')
 
-toGridCoords :: Integral a => (a, a) -> (Double, Double) -> Maybe (Double, Double)
-toGridCoords (w,h) (x,y) =
+toGridCoords :: V2 Double -> Point V2 Double -> Maybe (Point V2 Double)
+toGridCoords (V2 w h) (P (V2 x y)) =
   let (_,_,gridPoints) =
-        Diagrams.adjustDia
+        D.adjustDia
           Cairo.Cairo
-          (Cairo.CairoOptions
-             ""
-             (Diagrams.Dims (fromIntegral w)
-                            (fromIntegral h))
-             Cairo.RenderOnly
-             False)
-          (gridIntersections 5 5)
+          (Cairo.CairoOptions ""
+                              (D.Dims w h)
+                              Cairo.RenderOnly
+                              False)
+          (gridIntersections gridHalfHeight gridHalfWidth)
       ps =
-        Diagrams.runQuery
-          (Diagrams.query gridPoints)
-          (Diagrams.p2
-             (x
-             ,y))
+        D.runQuery (D.query gridPoints)
+                   (D.p2 (x,y))
   in case ps of
-       (p:_) ->
-         Just p
+       (p:_) -> Just p
+       _ -> Nothing
 
-       _ ->
-         Nothing
-
-gridIntersection :: Double -> Double -> Diagrams.QDiagram Cairo.Cairo Diagrams.R2 [(Double, Double)]
+gridIntersection :: Double
+                 -> Double
+                 -> D.QDiagram Cairo.Cairo D.R2 [Point V2 Double]
 gridIntersection x y =
-  Diagrams.value [(x ,y)]
-    (Diagrams.translate
-       (Diagrams.r2 (x ,y))
-       (Diagrams.square 1))
+  D.value [P (V2 x y)]
+          (D.translate (D.r2 (x,y))
+                       (D.square 1))
 
-gridIntersections :: Double -> Double -> Diagrams.QDiagram Cairo.Cairo Diagrams.R2 [(Double, Double)]
+gridIntersections :: Double
+                  -> Double
+                  -> D.QDiagram Cairo.Cairo D.R2 [Point V2 Double]
 gridIntersections halfH halfW =
   foldMap (\x ->
-             foldMap (\y ->
-                        gridIntersection x y)
+             foldMap (\y -> gridIntersection x y)
                      [negate halfH .. halfH])
           [negate halfW .. halfW]
 
-simpleEvent :: (GTK.GObjectClass obj,RB.MonadIO m) => (m () -> IO (GTK.ConnectId obj)) -> RB.AddHandler ()
-simpleEvent f = withEvent f (\h -> h ())
-
-withEvent :: (GTK.GObjectClass obj,RB.MonadIO m) => (t -> IO (GTK.ConnectId obj)) -> ((a -> m ()) -> t) -> RB.AddHandler a
+withEvent :: (GTK.GObjectClass obj,RB.MonadIO m)
+          => (t -> IO (GTK.ConnectId obj))
+          -> ((a -> m ()) -> t)
+          -> RB.AddHandler a
 withEvent f m =
-  RB.AddHandler $ \h ->
-    fmap GTK.signalDisconnect $
-    f (m (liftIO . h))
+  RB.AddHandler
+    (\h ->
+       fmap GTK.signalDisconnect (f (m (liftIO . h))))
 
-gridLines :: Diagrams.Diagram Diagrams.Cairo Diagrams.R2
+gridLines :: D.Diagram D.Cairo D.R2
 gridLines =
-  Diagrams.lc
-    Diagrams.white
-    (gridLinesIn (negate gridHalfWidth)
-                 gridHalfWidth <>
-     Diagrams.rotate
-       (90 Diagrams.@@ Diagrams.deg)
-       (gridLinesIn (negate gridHalfHeight)
-                    gridHalfHeight))
+  D.lc D.white
+       (gridLinesIn (negate gridHalfWidth)
+                    gridHalfWidth <>
+        D.rotate (90 D.@@ D.deg)
+                 (gridLinesIn (negate gridHalfHeight)
+                              gridHalfHeight))
 
-gridLinesIn :: Double -> Double -> Diagrams.Diagram Diagrams.Cairo Diagrams.R2
-gridLinesIn x y = Diagrams.dashingG [1 / 20, 1 / 20] 0 $
-  foldMap (\n ->
-             Diagrams.opacity
-               (0.5 + 0.5 *
-                (fromIntegral (round n `mod` 2 :: Int))) $
-             Diagrams.translate (Diagrams.r2 (0,n)) $
-             Diagrams.scale len $
-             gridLine)
-          [x .. y]
+gridLinesIn :: Double -> Double -> D.Diagram D.Cairo D.R2
+gridLinesIn x y =
+  D.dashingG
+    [1 / 20,1 / 20]
+    0
+    (foldMap (\n ->
+                D.opacity (0.5 +
+                           0.5 *
+                           (fromIntegral (round n `mod` 2 :: Int)))
+                          (D.translate (D.r2 (0,n))
+                                       (D.scale len gridLine)))
+             [x .. y])
   where len = y - x
 
-gridHalfWidth, gridHalfHeight :: Double
-(gridHalfWidth, gridHalfHeight) = (100, 100)
+gridHalfWidth :: Num a => a
+gridHalfWidth = 2
 
-gridLine :: Diagrams.Diagram Diagrams.Cairo Diagrams.R2
+gridHalfHeight :: Num a => a
+gridHalfHeight = 2
+
+gridLine :: D.Diagram D.Cairo D.R2
 gridLine =
-  Diagrams.centerX $
-  Diagrams.lwO 1 $
-  Diagrams.strokeLine $
-  Diagrams.lineFromVertices [Diagrams.p2 (0,0),Diagrams.p2 (1,0)]
+  D.centerX
+    (D.lwO
+       1
+       (D.strokeLine
+          (D.lineFromVertices [D.p2 (0,0),D.p2 (1,0)])))
