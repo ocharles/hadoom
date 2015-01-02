@@ -33,7 +33,7 @@ main =
      gui <- HadoomGUI w <$>
             newIORef mempty <*>
             pure da <*>
-            pure outputSize
+            pure 20
      RB.compile (editorNetwork gui) >>=
        RB.actuate
      _ <- GTK.on da
