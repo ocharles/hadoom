@@ -28,6 +28,8 @@ import Foreign
 import Foreign.C
 import Graphics.GL
 import Hadoom.GL.World
+import Hadoom.World
+import Hadoom.WorldBSP
 import Light
 import Linear as L
 import Material
@@ -65,12 +67,12 @@ data Shaders =
 makeClassy ''Shaders
 
 --------------------------------------------------------------------------------
-hadoom :: SDL.Window -> IO b
-hadoom win =
+hadoom :: PWorld 'TWorld -> SDL.Window -> IO b
+hadoom world win =
   do static <- loadRenderData
      runReaderT
        (do initialShaders <- liftIO reloadShaders
-           evalStateT (fix step (scene,clockSession_))
+           evalStateT (fix step (scene (compileBSP world),clockSession_))
                       initialShaders)
        static
   where step again (w,sess) =
@@ -154,7 +156,7 @@ hadoom win =
         loadRenderData =
           RenderData <$>
           (unGLFramebufferObject <$> genLightFramebufferObject) <*>
-          (compile testWorld >>= \(GLWorld w) -> return w) <*>
+          (compile world >>= \(GLWorld w) -> return w) <*>
           V.replicateM 10
                        ((,) <$> genLightDepthMap <*> genLightDepthMap) <*>
           overPtr (glGenVertexArrays 1)
@@ -310,8 +312,8 @@ renderFromCamera lights =
              liftIO . drawWorldTextured =<< view world
 
 --------------------------------------------------------------------------------
-withHadoom :: (SDL.Window -> IO b) -> IO b
-withHadoom m =
+withGLWindow :: (SDL.Window -> IO b) -> IO b
+withGLWindow m =
   do _ <- SDL.initialize ([SDL.InitEverything] :: [SDL.InitFlag])
      win <- SDL.createWindow
               "Hadoom"
@@ -332,7 +334,7 @@ withHadoom m =
 
 --------------------------------------------------------------------------------
 playHadoom :: IO ()
-playHadoom = withHadoom hadoom
+playHadoom = withGLWindow (hadoom testWorld)
 
 --------------------------------------------------------------------------------
 joinMap :: Monad m => (a -> m b) -> m a -> m b

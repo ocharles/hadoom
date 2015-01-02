@@ -33,7 +33,8 @@ main =
      gui <- HadoomGUI w <$>
             newIORef mempty <*>
             pure da <*>
-            pure (outputSize / 50)
+            pure (outputSize / 50) <*>
+            GTK.builderGetObject builder GTK.castToToolButton "toolbutton1"
      RB.compile (editorNetwork gui) >>=
        RB.actuate
      _ <- GTK.on da

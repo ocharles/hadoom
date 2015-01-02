@@ -17,6 +17,7 @@ import Graphics.GL
 import Hadoom.Geometry
 import Hadoom.World
 import Linear
+import Linear.Affine
 import Material
 import Util
 import qualified Data.Vector as V
@@ -50,7 +51,7 @@ data CompiledWorld =
                 ,cwWalls :: [CompiledWall]}
 
 data GLInterpretation :: SceneElementType -> * where
-  GLVertex :: V2 Float -> GLInterpretation TVertex
+  GLVertex :: Point V2 Float -> GLInterpretation TVertex
   GLWall :: CompiledWall -> GLInterpretation TWall
   GLWallFace :: CompiledSector -> Maybe CompiledMaterial -> Maybe CompiledMaterial -> Maybe CompiledMaterial -> GLInterpretation TWallFace
   GLSector :: CompiledSector -> GLInterpretation TSector
@@ -96,9 +97,9 @@ drawWorldGeometry (CompiledWorld sectors walls) =
                sectors
      traverse_ (\CompiledWall{..} ->
                   let drawWallFace CompiledWallFace{..} =
-                        do for_ cwfLower (\WallSegment{..} -> wsRender)
-                           for_ cwfUpper (\WallSegment{..} -> wsRender)
-                           for_ cwfMiddle (\WallSegment{..} -> wsRender)
+                        do for_ cwfLower wsRender
+                           for_ cwfUpper wsRender
+                           for_ cwfMiddle wsRender
                   in do drawWallFace cwFront
                         traverse drawWallFace cwBack)
                walls
@@ -133,7 +134,7 @@ compile (PWorld levelExpr) = go levelExpr
                          traverse go mkVertices
              let floorVertices =
                    vertices <&>
-                   \(V2 x y) ->
+                   \(P (V2 x y)) ->
                      GL.Vertex (realToFrac <$>
                                 V3 x (sectorFloor props) y)
                                (V3 0 1 0)
@@ -258,7 +259,7 @@ compile (PWorld levelExpr) = go levelExpr
                nullPtr
                GL_STATIC_DRAW
              -- Upload vertex data.
-             let wallV = v2 ^-^ v1
+             let wallV = v2 .-. v1
                  wallLen = norm wallV
                  frontHeight =
                    sectorCeiling (csProperties frontSector) -

@@ -5,15 +5,16 @@
 {-# LANGUAGE PolyKinds #-}
 module Hadoom.WorldBSP (compileBSP) where
 
-import Linear
 import BasePrelude
-import Hadoom.BSP
 import Data.TList
-import Hadoom.World
+import Hadoom.BSP
 import Hadoom.Geometry
+import Hadoom.World
+import Linear
+import Linear.Affine
 
 data V :: SceneElementType -> * where
-  VVertex :: V2 Float -> V TVertex
+  VVertex :: Point V2 Float -> V TVertex
   VLines :: [LineSegment Float] -> V a
 
 compileBSP :: PWorld TWorld -> BSP Float

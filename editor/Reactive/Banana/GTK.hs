@@ -51,3 +51,11 @@ withEvent f m =
   RB.AddHandler
     (\h ->
        fmap GTK.signalDisconnect (f (m (liftIO . h))))
+
+registerToolButtonClicked b =
+  RB.fromAddHandler
+    (RB.AddHandler
+       (\h ->
+          fmap GTK.signalDisconnect
+               (GTK.onToolButtonClicked b
+                                        (h ()))))

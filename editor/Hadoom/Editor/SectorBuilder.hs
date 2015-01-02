@@ -1,3 +1,5 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
 module Hadoom.Editor.SectorBuilder where
 
 import BasePrelude
@@ -5,6 +7,10 @@ import Data.List.NonEmpty (NonEmpty(..))
 import Linear
 import Linear.Affine
 import Reactive.Banana
+
+import Data.TList
+import Hadoom.World
+import Material (ColorSpace(..))
 
 -- | The 'SectorBuilder' is responsible for building a new sector out of a
 -- series of mouse clicks, corresponding to each vertex of the sector. Sector
@@ -46,3 +52,38 @@ mkSectorBuilder = accumB emptySectorBuilder . fmap updateSectorBuilder
                      ,sbComplete =
                         (initialPoint :| reverse ps) :
                         sbComplete sb}
+
+toWorld :: SectorBuilder -> PWorld TWorld
+toWorld sb =
+  let sectors :: WorldExpr f TMaterial
+              -> [(WorldExpr f TSector,[WorldExpr f TWall])]
+      sectors mat =
+        map (\(v :| vs) ->
+               let vertices = v : vs
+                   walls =
+                     zip vertices
+                         (vs ++
+                          [v])
+                   s =
+                     Sector (SectorProperties 0 3)
+                            (map (Vertex . fmap realToFrac) vertices)
+                            mat
+                            mat
+               in (s
+                  ,map (\(v1,v2) ->
+                          Wall (Vertex (realToFrac <$> v2))
+                               (Vertex (realToFrac <$> v1))
+                               (WallFace s
+                                         (Just mat)
+                                         (Just mat)
+                                         (Just mat))
+                               Nothing)
+                       walls))
+            (sbComplete sb)
+  in PWorld (letrec (\_ ->
+                       Material (Texture "test-texture.jpg" SRGB)
+                                (Just (Texture "flat.jpg" Linear)) :::
+                       TNil)
+                    (\(t ::: _) ->
+                       World (map fst (sectors t))
+                             (concatMap snd (sectors t))))

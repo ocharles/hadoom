@@ -15,13 +15,14 @@ import qualified Diagrams.Prelude as D
 import qualified Graphics.UI.Gtk as GTK
 import qualified Reactive.Banana as RB
 import qualified Reactive.Banana.Frameworks as RB
+import qualified Hadoom
 
 data HadoomGUI =
   HadoomGUI {appWindow :: GTK.Window
             ,outRef :: IORef (D.Diagram D.Cairo D.R2)
             ,guiMap :: GTK.DrawingArea
             ,mapExtents :: V2 Double
-            }
+            ,playHadoomButton :: GTK.ToolButton}
 
 -- TODO
 outputSize :: Num a => V2 a
@@ -66,6 +67,12 @@ editorNetwork HadoomGUI{..} =
         diagramChanged)
      RB.reactimate (GTK.widgetQueueDraw guiMap <$ shouldRedraw)
      RB.reactimate (GTK.mainQuit <$ mainWindowClosed)
+     playHadoom <- registerToolButtonClicked playHadoomButton
+     RB.reactimate
+       (Hadoom.withGLWindow <$>
+        (Hadoom.hadoom <$>
+         (toWorld <$> sectorBuilder)) <@
+        playHadoom)
 
 gridIntersections :: V2 Double -> D.QDiagram Cairo.Cairo D.R2 [Point V2 Double]
 gridIntersections (V2 halfW halfH) =

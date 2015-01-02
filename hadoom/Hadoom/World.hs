@@ -12,6 +12,7 @@ module Hadoom.World
 import BasePrelude
 import Data.TList
 import Linear
+import Linear.Affine
 import Material
 import System.IO
 
@@ -43,7 +44,7 @@ data WorldExpr :: (SceneElementType -> *) -> SceneElementType -> * where
   Var :: f t -> WorldExpr f t
 
   -- | Vertices in the 2D plane of the  world.
-  Vertex :: V2 Float -> WorldExpr f TVertex
+  Vertex :: Point V2 Float -> WorldExpr f TVertex
 
   -- | Walls between vertices. A wall has a front face, and an optional back
   -- face.

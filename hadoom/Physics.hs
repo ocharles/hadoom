@@ -12,10 +12,9 @@ import Foreign.C (CFloat)
 import Hadoom.BSP
 import Hadoom.Camera
 import Hadoom.Geometry
-import Hadoom.WorldBSP
 import Light
 import Linear as L
-import TestWorld
+import Linear.Affine
 import qualified Data.Vector as V
 import qualified SDL
 
@@ -31,9 +30,9 @@ lightDir theta =
       m !*
       V3 0 0 (-1) :: V3 CFloat
 
-scene :: (Applicative m, HasTime t s, Monoid e, MonadFix m) => Wire s e m [SDL.Event] Scene
-scene =
-  let cam = worldCamera
+scene :: (Applicative m, HasTime t s, Monoid e, MonadFix m) => BSP Float -> Wire s e m [SDL.Event] Scene
+scene worldGeom =
+  let cam = worldCamera worldGeom
       lights = time <&> \t ->
           [Light (V3 0 2 0)
                  (V3 1 1 1)
@@ -59,8 +58,8 @@ scene =
           ,Light (V3 0 2 (-3)) 1 30 Omni]
   in Scene <$> cam <*> lights
 
-worldCamera :: (Applicative m, HasTime t s, MonadFix m, Monoid e) => Wire s e m [SDL.Event] (M44 CFloat)
-worldCamera =
+worldCamera :: (Applicative m, HasTime t s, MonadFix m, Monoid e) => BSP Float -> Wire s e m [SDL.Event] (M44 CFloat)
+worldCamera worldBSP =
   let c = camera
       speedFromKey s scancode =
         bool 0 s <$>
@@ -85,14 +84,13 @@ worldCamera =
               speedFromKey (-2)
                            SDL.ScancodeD
         in (^*) <$> strafeV <*> strafeSpeed
-      worldBSP = compileBSP testWorld
       translation2D =
         integralSatisfying noCollisions 0 .
         ((+) <$> forwardMotion <*> strafeMotion)
       playerRadius = 0.4
       noCollisions p =
         not (circleIntersects worldBSP
-                              (Circle (realToFrac <$> p ^. _xz) playerRadius))
+                              (Circle (P (realToFrac <$> p ^. _xz)) playerRadius))
       headPosition = V3 0 1.75 0
   in set translation <$>
      ((+) <$> pure headPosition <*> translation2D) <*>
