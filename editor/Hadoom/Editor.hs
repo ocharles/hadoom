@@ -25,7 +25,7 @@ data HadoomGUI =
 
 -- TODO
 outputSize :: Num a => V2 a
-outputSize = V2 40 40 ^* (2 * 25)
+outputSize = V2 40 40 ^* 25
 
 editorNetwork :: RB.Frameworks t
               => HadoomGUI -> RB.Moment t ()
@@ -49,6 +49,7 @@ editorNetwork HadoomGUI{..} =
          overSector =
            querySelected <$>
            (sbComplete <$> sectorBuilder) <*>
+           pure mapExtents <*>
            (toDiagramCoords <$> widgetSize <*> pure mapExtents <*>
             RB.stepper 0 mouseMoved)
          selectedSector =
@@ -95,14 +96,16 @@ toGridCoords (V2 w h) mapExtents (P (V2 x y)) =
        _ -> Nothing
 
 querySelected :: [NonEmpty (Point V2 Double)]
+              -> V2 Double
               -> Point V2 Double
               -> Maybe (NonEmpty (Point V2 Double))
-querySelected sectors (P (V2 x y)) =
+querySelected sectors (V2 w h) (P (V2 x y)) =
   let sectorPaths =
         foldMap (\s ->
                    D.value (First (Just s))
                            (renderSector s))
-                sectors
+                sectors <>
+        D.value mempty (D.rect (2 * w) (2 * h))
   in getFirst (D.runQuery (D.query sectorPaths)
                           (D.p2 (x,y)))
 
