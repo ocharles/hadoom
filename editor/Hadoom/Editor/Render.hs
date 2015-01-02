@@ -17,38 +17,58 @@ data EditorState =
               ,esSelectedSector :: Maybe (NonEmpty (Point V2 Double))
               ,esHalfExtents :: V2 Double}
 
+renderVertex :: D.Diagram Cairo.Cairo D.R2
+renderVertex = D.lw D.none (D.square (1 / 10))
+
 renderEditor :: EditorState -> D.Diagram Cairo.Cairo D.R2
 renderEditor EditorState{..} =
   let P (V2 mouseX mouseY) = esMousePosition
-  in mconcat [D.lw D.none
-                   (D.fc D.red
-                         (D.translate (D.r2 (mouseX,mouseY))
-                                      (D.square (1 / 5))))
+  in mconcat [
+                   D.fc D.white
+                         (D.translate (pointToR2 esMousePosition)
+                                      renderVertex)
              ,foldMap (D.lc D.white .
                        D.lwO 2 .
                        renderSector)
                       (sbComplete esSectorBuilder)
              ,foldMap (D.fc D.red . renderSector) esHoverSector
              ,foldMap (D.fc D.white . renderSector) esSelectedSector
-             ,case sbInProgress esSectorBuilder of
-                Just (initialPoint :| vertices) ->
-                  D.lc D.green
-                       (D.lwO 2
-                              (D.strokeLocLine
-                                 (D.fromVertices
-                                    (map pointToP2
-                                         (initialPoint :
-                                          reverse (P (V2 mouseX mouseY) :
-                                                   vertices))))))
-                Nothing -> mempty
+             ,foldMap (\(initialPoint :| vertices) ->
+                         D.lwO 2
+                               (D.lc D.orange
+                                     (D.strokeLocLine
+                                        (D.fromVertices
+                                           (map pointToP2
+                                                (reverse (take 2
+                                                               (reverse (initialPoint :
+                                                                         reverse (P (V2 mouseX
+                                                                                        mouseY) :
+                                                                                  vertices)))))))) <>
+                                D.lc D.red
+                                     (D.strokeLocLine
+                                        (D.fromVertices
+                                           (map pointToP2
+                                                (init (initialPoint :
+                                                       reverse (P (V2 mouseX mouseY) :
+                                                                vertices))))))))
+                      (sbInProgress esSectorBuilder)
              ,gridLines esHalfExtents]
 
 renderSector :: NonEmpty (Point V2 Double) -> D.Diagram Cairo.Cairo D.R2
-renderSector =
-  D.strokeLocLoop .
-  D.mapLoc D.closeLine .
-  D.fromVertices .
-  foldMap (\(P (V2 x y)) -> [D.p2 (x,y)])
+renderSector vertices = renderVertices <> renderWallFacing <> renderWalls
+  where renderWalls =
+          D.strokeLocLoop
+            (D.mapLoc D.closeLine
+                      (D.fromVertices
+                         (foldMap (\(P (V2 x y)) ->
+                                     [D.p2 (x,y)])
+                                  vertices)))
+        renderVertices =
+          D.fc D.lightskyblue
+               (foldMap (\p ->
+                           D.translate (pointToR2 p)
+                                       renderVertex)
+                        vertices)
 
 gridLines :: V2 Double -> D.Diagram D.Cairo D.R2
 gridLines (V2 gridHalfWidth gridHalfHeight) =
@@ -77,3 +97,6 @@ gridLines (V2 gridHalfWidth gridHalfHeight) =
 
 pointToP2 :: Point V2 Double -> D.P2
 pointToP2 (P (V2 x y)) = D.p2 (x,y)
+
+pointToR2 :: Point V2 Double -> D.R2
+pointToR2 (P (V2 x y)) = D.r2 (x,y)
