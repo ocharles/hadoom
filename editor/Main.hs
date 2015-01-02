@@ -16,9 +16,7 @@ import qualified Reactive.Banana as RB
 import qualified Reactive.Banana.Frameworks as RB
 
 import Hadoom.Editor.SectorBuilder
-
-pointToP2 :: Point V2 Double -> D.P2
-pointToP2 (P (V2 x y)) = D.p2 (x,y)
+import Hadoom.Editor.Render
 
 outputSize :: Num a => V2 a
 outputSize =
@@ -65,42 +63,6 @@ data HadoomGUI =
   HadoomGUI {appWindow :: GTK.Window
             ,outRef :: IORef (D.Diagram D.Cairo D.R2)
             ,guiMap :: GTK.DrawingArea}
-
-visualizeMap :: Point V2 Double
-             -> SectorBuilder
-             -> Maybe (NonEmpty (Point V2 Double))
-             -> Maybe (NonEmpty (Point V2 Double))
-             -> D.Diagram Cairo.Cairo D.R2
-visualizeMap (P (V2 mouseX mouseY)) sb overSector selectedSector =
-  mconcat [D.lw D.none
-                (D.fc D.red
-                      (D.translate (D.r2 (mouseX,mouseY))
-                                   (D.square (1 / 5))))
-          ,foldMap (D.lc D.white .
-                    D.lwO 2 .
-                    sectorDiagram)
-                   (sbComplete sb)
-          ,foldMap (D.fc D.red . sectorDiagram) overSector
-          ,foldMap (D.fc D.white . sectorDiagram) selectedSector
-          ,case sbInProgress sb of
-             Just (initialPoint :| vertices) ->
-               D.lc D.green
-                    (D.lwO 2
-                           (D.strokeLocLine
-                              (D.fromVertices
-                                 (map pointToP2
-                                      (initialPoint :
-                                       reverse (P (V2 mouseX mouseY) :
-                                                vertices))))))
-             Nothing -> mempty
-          ,gridLines]
-
-sectorDiagram :: NonEmpty (Point V2 Double) -> D.Diagram Cairo.Cairo D.R2
-sectorDiagram =
-  D.strokeLocLoop .
-  D.mapLoc D.closeLine .
-  D.fromVertices .
-  foldMap (\(P (V2 x y)) -> [D.p2 (x,y)])
 
 registerDestroy :: (RB.Frameworks t,GTK.WidgetClass w)
                 => w -> RB.Moment t (RB.Event t ())
@@ -153,7 +115,8 @@ hadoomEditorNetwork HadoomGUI{..} =
          gridCoords =
            RB.stepper 0
                       (RB.filterJust (toGridCoords <$> widgetSize <@> mouseMoved))
-         sectorBuilder = mkSectorBuilder (gridCoords <@ lmbClicked)
+         sectorBuilder =
+           mkSectorBuilder (gridCoords <@ lmbClicked)
          overSector =
            querySelected <$>
            (sbComplete <$> sectorBuilder) <*>
@@ -162,8 +125,11 @@ hadoomEditorNetwork HadoomGUI{..} =
          selectedSector =
            RB.stepper Nothing
                       (overSector <@ rmbClicked)
-         diagram = visualizeMap <$> gridCoords <*> sectorBuilder <*> overSector <*>
-                   selectedSector
+         editorState =
+           EditorState <$> gridCoords <*> sectorBuilder <*> overSector <*>
+           selectedSector <*>
+           pure (V2 gridHalfWidth gridHalfHeight)
+         diagram = renderEditor <$> editorState
          shouldRedraw =
            foldl1 RB.union [void mouseMoved,void mouseClicked]
      diagramChanged <- RB.changes diagram
@@ -180,7 +146,7 @@ querySelected sectors (P (V2 x y)) =
   let sectorPaths =
         foldMap (\s ->
                    D.value (First (Just s))
-                           (sectorDiagram s))
+                           (renderSector s))
                 sectors
   in getFirst (D.runQuery (D.query sectorPaths)
                           (D.p2 (x,y)))
@@ -243,39 +209,8 @@ withEvent f m =
     (\h ->
        fmap GTK.signalDisconnect (f (m (liftIO . h))))
 
-gridLines :: D.Diagram D.Cairo D.R2
-gridLines =
-  D.lc D.white
-       (gridLinesIn (negate gridHalfWidth)
-                    gridHalfWidth <>
-        D.rotate (90 D.@@ D.deg)
-                 (gridLinesIn (negate gridHalfHeight)
-                              gridHalfHeight))
-
-gridLinesIn :: Double -> Double -> D.Diagram D.Cairo D.R2
-gridLinesIn x y =
-  D.dashingG
-    [1 / 20,1 / 20]
-    0
-    (foldMap (\n ->
-                D.opacity (0.5 +
-                           0.5 *
-                           (fromIntegral (round n `mod` 2 :: Int)))
-                          (D.translate (D.r2 (0,n))
-                                       (D.scale len gridLine)))
-             [x .. y])
-  where len = y - x
-
 gridHalfWidth :: Num a => a
 gridHalfWidth = 40
 
 gridHalfHeight :: Num a => a
 gridHalfHeight = 40
-
-gridLine :: D.Diagram D.Cairo D.R2
-gridLine =
-  D.centerX
-    (D.lwO
-       1
-       (D.strokeLine
-          (D.lineFromVertices [D.p2 (0,0),D.p2 (1,0)])))
