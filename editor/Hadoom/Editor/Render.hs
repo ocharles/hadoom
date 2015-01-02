@@ -9,6 +9,7 @@ import Linear.Affine
 import qualified Diagrams.Backend.Cairo as D
 import qualified Diagrams.Backend.Cairo.Internal as Cairo
 import qualified Diagrams.Prelude as D
+import qualified Diagrams.TwoD.Vector as D
 
 data EditorState =
   EditorState {esMousePosition :: Point V2 Double
@@ -35,27 +36,29 @@ renderEditor EditorState{..} =
              ,foldMap (\(initialPoint :| vertices) ->
                          D.lwO 2
                                (D.lc D.orange
-                                     (D.strokeLocLine
-                                        (D.fromVertices
-                                           (map pointToP2
-                                                (reverse (take 2
-                                                               (reverse (initialPoint :
-                                                                         reverse (P (V2 mouseX
-                                                                                        mouseY) :
-                                                                                  vertices)))))))) <>
+                                     (trailWithEdgeDirections
+                                        (D.mapLoc D.wrapLine
+                                                  (D.fromVertices
+                                                     (map pointToP2
+                                                          (initialPoint :
+                                                           reverse vertices))))) <>
                                 D.lc D.red
-                                     (D.strokeLocLine
-                                        (D.fromVertices
-                                           (map pointToP2
-                                                (init (initialPoint :
-                                                       reverse (P (V2 mouseX mouseY) :
-                                                                vertices))))))))
+                                     (trailWithEdgeDirections
+                                        (D.mapLoc D.wrapLine
+                                                  (D.fromVertices
+                                                     (map pointToP2
+                                                          (reverse (take 2
+                                                                         (reverse (initialPoint :
+                                                                                   reverse (P (V2 mouseX
+                                                                                                  mouseY) :
+                                                                                            vertices)))))))))))
                       (sbInProgress esSectorBuilder)
              ,gridLines esHalfExtents]
 
 renderSector :: NonEmpty (Point V2 Double) -> D.Diagram Cairo.Cairo D.R2
 renderSector vertices =
-  let sectorPolygon =
+  let sectorPolygon :: D.Located (D.Trail D.R2)
+      sectorPolygon =
         D.mapLoc (D.wrapTrail . D.closeLine)
                  (D.fromVertices
                     (foldMap (\(P (V2 x y)) ->
@@ -64,7 +67,22 @@ renderSector vertices =
   in D.fc D.lightskyblue
           (D.decorateLocatedTrail sectorPolygon
                                   (repeat renderVertex)) <>
-     D.strokeLocTrail sectorPolygon
+     trailWithEdgeDirections sectorPolygon
+
+trailWithEdgeDirections :: D.Located (D.Trail D.R2) -> D.Diagram D.Cairo D.R2
+trailWithEdgeDirections sectorPolygon =
+  D.strokeLocTrail sectorPolygon <>
+  foldMap (\wall ->
+             case D.explodeTrail (wall :: D.Located (D.Trail D.R2)) :: [[D.P2]] of
+               [p1,p2]:_ ->
+                 let v =
+                       D.normalized (p2 D..-. p1)
+                 in D.moveTo (wall `D.atParam` 0.5)
+                             (D.strokeLine
+                                (D.lineFromVertices
+                                   [D.origin,D.origin D..+^ D.perp v D.^* 0.2]))
+               _ -> mempty)
+          (D.explodeTrail sectorPolygon)
 
 gridLines :: V2 Double -> D.Diagram D.Cairo D.R2
 gridLines (V2 gridHalfWidth gridHalfHeight) =
