@@ -25,7 +25,7 @@ data HadoomGUI =
 
 -- TODO
 outputSize :: Num a => V2 a
-outputSize = V2 40 40 ^* 25
+outputSize = V2 30 30 ^* 50
 
 editorNetwork :: RB.Frameworks t
               => HadoomGUI -> RB.Moment t ()
