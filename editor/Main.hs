@@ -2,6 +2,7 @@
 module Main (main) where
 
 import BasePrelude
+import Data.List.NonEmpty (NonEmpty(..))
 import Control.Lens ((^.))
 import Control.Monad.Trans (liftIO)
 import Linear
@@ -13,6 +14,8 @@ import qualified Diagrams.Prelude as D
 import qualified Graphics.UI.Gtk as GTK
 import qualified Reactive.Banana as RB
 import qualified Reactive.Banana.Frameworks as RB
+
+import Hadoom.Editor.SectorBuilder
 
 pointToP2 :: Point V2 Double -> D.P2
 pointToP2 (P (V2 x y)) = D.p2 (x,y)
@@ -63,32 +66,10 @@ data HadoomGUI =
             ,outRef :: IORef (D.Diagram D.Cairo D.R2)
             ,guiMap :: GTK.DrawingArea}
 
-data SectorBuilder =
-  SectorBuilder {sbInProgress :: Maybe (Point V2 Double,[Point V2 Double])
-                ,sbComplete :: [[Point V2 Double]]}
-
-emptySectorBuilder :: SectorBuilder
-emptySectorBuilder = SectorBuilder Nothing []
-
-updateSectorBuilder :: Point V2 Double -> SectorBuilder -> SectorBuilder
-updateSectorBuilder coords sb =
-  case sbInProgress sb of
-    Nothing ->
-      sb {sbInProgress = Just (coords,[])}
-    Just (initialPoint,ps)
-      | coords /= initialPoint ->
-        sb {sbInProgress =
-              Just (initialPoint,coords : ps)}
-      | otherwise ->
-        sb {sbInProgress = Nothing
-           ,sbComplete =
-              (initialPoint : reverse ps) :
-              sbComplete sb}
-
 visualizeMap :: Point V2 Double
              -> SectorBuilder
-             -> Maybe [Point V2 Double]
-             -> Maybe [Point V2 Double]
+             -> Maybe (NonEmpty (Point V2 Double))
+             -> Maybe (NonEmpty (Point V2 Double))
              -> D.Diagram Cairo.Cairo D.R2
 visualizeMap (P (V2 mouseX mouseY)) sb overSector selectedSector =
   mconcat [D.lw D.none
@@ -102,7 +83,7 @@ visualizeMap (P (V2 mouseX mouseY)) sb overSector selectedSector =
           ,foldMap (D.fc D.red . sectorDiagram) overSector
           ,foldMap (D.fc D.white . sectorDiagram) selectedSector
           ,case sbInProgress sb of
-             Just (initialPoint,vertices) ->
+             Just (initialPoint :| vertices) ->
                D.lc D.green
                     (D.lwO 2
                            (D.strokeLocLine
@@ -114,12 +95,12 @@ visualizeMap (P (V2 mouseX mouseY)) sb overSector selectedSector =
              Nothing -> mempty
           ,gridLines]
 
-sectorDiagram :: [Point V2 Double] -> D.Diagram Cairo.Cairo D.R2
+sectorDiagram :: NonEmpty (Point V2 Double) -> D.Diagram Cairo.Cairo D.R2
 sectorDiagram =
   D.strokeLocLoop .
   D.mapLoc D.closeLine .
   D.fromVertices .
-  map (\(P (V2 x y)) -> D.p2 (x,y))
+  foldMap (\(P (V2 x y)) -> [D.p2 (x,y)])
 
 registerDestroy :: (RB.Frameworks t,GTK.WidgetClass w)
                 => w -> RB.Moment t (RB.Event t ())
@@ -172,12 +153,7 @@ hadoomEditorNetwork HadoomGUI{..} =
          gridCoords =
            RB.stepper 0
                       (RB.filterJust (toGridCoords <$> widgetSize <@> mouseMoved))
-         sectorBuilderChanged =
-           RB.accumE emptySectorBuilder
-                     (updateSectorBuilder <$>
-                      (gridCoords <@ lmbClicked))
-         sectorBuilder =
-           RB.stepper emptySectorBuilder sectorBuilderChanged
+         sectorBuilder = mkSectorBuilder (gridCoords <@ lmbClicked)
          overSector =
            querySelected <$>
            (sbComplete <$> sectorBuilder) <*>
@@ -197,9 +173,9 @@ hadoomEditorNetwork HadoomGUI{..} =
      RB.reactimate (GTK.widgetQueueDraw guiMap <$ shouldRedraw)
      RB.reactimate (GTK.mainQuit <$ mainWindowClosed)
 
-querySelected :: [[Point V2 Double]]
+querySelected :: [NonEmpty (Point V2 Double)]
               -> Point V2 Double
-              -> Maybe [Point V2 Double]
+              -> Maybe (NonEmpty (Point V2 Double))
 querySelected sectors (P (V2 x y)) =
   let sectorPaths =
         foldMap (\s ->
@@ -291,10 +267,10 @@ gridLinesIn x y =
   where len = y - x
 
 gridHalfWidth :: Num a => a
-gridHalfWidth = 20
+gridHalfWidth = 40
 
 gridHalfHeight :: Num a => a
-gridHalfHeight = gridHalfWidth
+gridHalfHeight = 40
 
 gridLine :: D.Diagram D.Cairo D.R2
 gridLine =
