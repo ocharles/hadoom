@@ -18,7 +18,7 @@ data EditorState =
               ,esHalfExtents :: V2 Double}
 
 renderVertex :: D.Diagram Cairo.Cairo D.R2
-renderVertex = D.lw D.none (D.square (1 / 10))
+renderVertex = D.lw D.none (D.square (1 / 5))
 
 renderEditor :: EditorState -> D.Diagram Cairo.Cairo D.R2
 renderEditor EditorState{..} =
@@ -54,20 +54,17 @@ renderEditor EditorState{..} =
              ,gridLines esHalfExtents]
 
 renderSector :: NonEmpty (Point V2 Double) -> D.Diagram Cairo.Cairo D.R2
-renderSector vertices = renderVertices <> renderWalls
-  where renderWalls =
-          D.strokeLocLoop
-            (D.mapLoc D.closeLine
-                      (D.fromVertices
-                         (foldMap (\(P (V2 x y)) ->
-                                     [D.p2 (x,y)])
-                                  vertices)))
-        renderVertices =
-          D.fc D.lightskyblue
-               (foldMap (\p ->
-                           D.translate (pointToR2 p)
-                                       renderVertex)
-                        vertices)
+renderSector vertices =
+  let sectorPolygon =
+        D.mapLoc (D.wrapTrail . D.closeLine)
+                 (D.fromVertices
+                    (foldMap (\(P (V2 x y)) ->
+                                [D.p2 (x,y)])
+                             vertices))
+  in D.fc D.lightskyblue
+          (D.decorateLocatedTrail sectorPolygon
+                                  (repeat renderVertex)) <>
+     D.strokeLocTrail sectorPolygon
 
 gridLines :: V2 Double -> D.Diagram D.Cairo D.R2
 gridLines (V2 gridHalfWidth gridHalfHeight) =
