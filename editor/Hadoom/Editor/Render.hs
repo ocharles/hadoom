@@ -9,7 +9,6 @@ import Linear.Affine
 import qualified Diagrams.Backend.Cairo as D
 import qualified Diagrams.Backend.Cairo.Internal as Cairo
 import qualified Diagrams.Prelude as D
-import qualified Diagrams.TwoD.Vector as D
 
 data EditorState =
   EditorState {esMousePosition :: Point V2 Double
@@ -73,15 +72,12 @@ trailWithEdgeDirections :: D.Located (D.Trail D.R2) -> D.Diagram D.Cairo D.R2
 trailWithEdgeDirections sectorPolygon =
   D.strokeLocTrail sectorPolygon <>
   foldMap (\wall ->
-             case D.explodeTrail (wall :: D.Located (D.Trail D.R2)) :: [[D.P2]] of
-               [p1,p2]:_ ->
-                 let v =
-                       D.normalized (p2 D..-. p1)
-                 in D.moveTo (wall `D.atParam` 0.5)
-                             (D.strokeLine
-                                (D.lineFromVertices
-                                   [D.origin,D.origin D..+^ D.perp v D.^* 0.2]))
-               _ -> mempty)
+             D.moveTo ((wall :: D.Located (D.Trail D.R2)) `D.atParam`
+                       0.5)
+                      (D.strokeLine
+                         (D.lineFromVertices
+                            [D.origin
+                            ,D.origin D..+^ (negate (D.normalAtParam wall 0.5 D.^* 0.2))])))
           (D.explodeTrail sectorPolygon)
 
 gridLines :: V2 Double -> D.Diagram D.Cairo D.R2
