@@ -1,13 +1,9 @@
 {-# LANGUAGE RecordWildCards #-}
 module Main (main) where
 
-import Control.Applicative
+import BasePrelude
 import Control.Lens ((^.))
-import Control.Monad
 import Control.Monad.Trans (liftIO)
-import Data.Foldable (foldMap)
-import Data.IORef
-import Data.Monoid
 import Linear
 import Linear.Affine
 import Reactive.Banana ((<@), (<@>))
@@ -29,12 +25,11 @@ outputSize =
 main :: IO ()
 main =
   do _ <- GTK.initGUI
-     w <- GTK.windowNew
-     _ <- GTK.on w GTK.destroyEvent (False <$ liftIO GTK.mainQuit)
-     adj <- GTK.adjustmentNew 1000 0 500 1 5 10
-     vp <- GTK.viewportNew adj adj
-     s <- GTK.scrolledWindowNew Nothing Nothing
-     da <- GTK.drawingAreaNew
+     builder <- GTK.builderNew
+     GTK.builderAddFromFile builder "editor/editor.glade"
+     w <- GTK.builderGetObject builder GTK.castToWindow "appWindow"
+     GTK.widgetShow w
+     da <- GTK.builderGetObject builder GTK.castToDrawingArea "mapDrawingArea"
      GTK.widgetAddEvents
        da
        [GTK.PointerMotionMask
@@ -44,13 +39,6 @@ main =
      GTK.widgetSetSizeRequest da
                               (outputSize ^. _x)
                               (outputSize ^. _y)
-     GTK.containerAdd s da
-     GTK.widgetShow da
-     GTK.containerAdd vp s
-     GTK.widgetShow s
-     GTK.containerAdd w vp
-     GTK.widgetShow vp
-     GTK.widgetShow w
      gui <- HadoomGUI w <$>
             newIORef mempty <*>
             pure da
@@ -74,13 +62,6 @@ data HadoomGUI =
   HadoomGUI {appWindow :: GTK.Window
             ,outRef :: IORef (D.Diagram D.Cairo D.R2)
             ,guiMap :: GTK.DrawingArea}
-
--- data HadoomGUI = HadoomGUI
---   { guiMap :: GTK.Layout
---   , guiWallTexture :: GTK.EventBox
---   , guiWallTextureImage :: GTK.Image
---   , guiTest :: GTK.ToolButton
---   }
 
 data SectorBuilder =
   SectorBuilder {sbInProgress :: Maybe (Point V2 Double,[Point V2 Double])
@@ -310,10 +291,10 @@ gridLinesIn x y =
   where len = y - x
 
 gridHalfWidth :: Num a => a
-gridHalfWidth = 2
+gridHalfWidth = 20
 
 gridHalfHeight :: Num a => a
-gridHalfHeight = 2
+gridHalfHeight = gridHalfWidth
 
 gridLine :: D.Diagram D.Cairo D.R2
 gridLine =
