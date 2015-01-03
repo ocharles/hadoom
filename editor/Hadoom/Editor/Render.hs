@@ -17,10 +17,12 @@ data EditorState =
               ,esSelectedSector :: Maybe (NonEmpty (Point V2 Double))
               ,esHalfExtents :: V2 Double}
 
-renderVertex :: D.Diagram Cairo.Cairo D.R2
+type Diagram = D.Diagram Cairo.Cairo D.R2
+
+renderVertex :: Diagram
 renderVertex = D.lw D.none (D.square (1 / 5))
 
-renderEditor :: EditorState -> D.Diagram Cairo.Cairo D.R2
+renderEditor :: EditorState -> Diagram
 renderEditor EditorState{..} =
   let P (V2 mouseX mouseY) = esMousePosition
   in mconcat [D.fc D.white
@@ -48,13 +50,26 @@ renderEditor EditorState{..} =
                                                      (map pointToP2
                                                           (reverse (take 2
                                                                          (reverse (initialPoint :
-                                                                                   reverse (P (V2 mouseX
+                                                                                    reverse (P (V2 mouseX
                                                                                                   mouseY) :
                                                                                             vertices)))))))))))
                       (sbInProgress esSectorBuilder)
+             ,renderOrigin
              ,gridLines esHalfExtents]
 
-renderSector :: NonEmpty (Point V2 Double) -> D.Diagram Cairo.Cairo D.R2
+-- | Render a cross hair at the origin. This is used to indicate the origin
+-- point of map space.
+renderOrigin :: Diagram
+renderOrigin =
+  D.lwO 1
+        (D.lc D.yellow
+              (mconcat (take 4
+                             (iterate (D.rotateBy (1 / 4))
+                                      (D.strokeLocLine
+                                         (D.fromVertices
+                                            [D.origin,D.p2 (1 / 2,0)]))))))
+
+renderSector :: NonEmpty (Point V2 Double) -> Diagram
 renderSector vertices =
   let sectorPolygon :: D.Located (D.Trail D.R2)
       sectorPolygon =
@@ -68,7 +83,7 @@ renderSector vertices =
                                   (repeat renderVertex)) <>
      trailWithEdgeDirections sectorPolygon
 
-trailWithEdgeDirections :: D.Located (D.Trail D.R2) -> D.Diagram D.Cairo D.R2
+trailWithEdgeDirections :: D.Located (D.Trail D.R2) -> Diagram
 trailWithEdgeDirections sectorPolygon =
   D.strokeLocTrail sectorPolygon <>
   foldMap (\wall ->
@@ -80,7 +95,7 @@ trailWithEdgeDirections sectorPolygon =
                             ,D.origin D..+^ (negate (D.normalAtParam wall 0.5 D.^* 0.2))])))
           (D.explodeTrail sectorPolygon)
 
-gridLines :: V2 Double -> D.Diagram D.Cairo D.R2
+gridLines :: V2 Double -> Diagram
 gridLines (V2 gridHalfWidth gridHalfHeight) =
   D.lc D.white
        (gridLinesIn (negate gridHalfWidth)
