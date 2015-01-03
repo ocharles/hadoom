@@ -46,17 +46,39 @@ renderEditor EditorState{..} =
           let lineWithNormals = trailWithEdgeDirections . D.mapLoc D.wrapLine .
                                                           D.fromVertices .
                                                           map pointToP2
-          in foldMap (\(initialPoint :| vertices) ->
-                        D.lwO 2
-                              (D.lc D.orange
-                                    (lineWithNormals
-                                       (initialPoint : reverse vertices)) <>
-                               D.lc D.red
-                                    (lineWithNormals
-                                       (reverse (take 2
-                                                      (reverse (initialPoint :
-                                                                reverse (esMousePosition :
-                                                                         vertices))))))))
+              renderSides (initialPoint :| vertices) =
+                D.lwO 2
+                      (D.lc D.orange
+                            (lineWithNormals (initialPoint : reverse vertices)) <>
+                       D.lc D.red
+                            (lineWithNormals
+                               (reverse (take 2
+                                              (reverse (initialPoint :
+                                                        reverse (esMousePosition :
+                                                                 vertices)))))))
+              renderLineLengths (initialPoint :| vertices) =
+                D.fontSizeO
+                  10
+                  (D.fc D.orange
+                        (foldMap (\wall ->
+                                    D.moveTo ((wall :: D.Located (D.Trail D.R2)) `D.atParam`
+                                              0.3)
+                                             ((case D.explodeTrail wall :: [[D.P2]] of
+                                                 [[p1,p2]] ->
+                                                   D.text (show (round (D.magnitude
+                                                                          (p1 D..-.
+                                                                           p2)) :: Int))
+                                                 _ -> mempty) <>
+                                              D.fc D.black (D.circle (2 / 5))))
+                                 (D.explodeTrail
+                                    (D.mapLoc D.wrapLine
+                                              (D.fromVertices
+                                                 (map pointToP2
+                                                      (initialPoint :
+                                                       reverse (esMousePosition :
+                                                                vertices))))))))
+          in foldMap (\vertices -> renderLineLengths vertices <>
+                                    renderSides vertices)
                      (sbInProgress esSectorBuilder)
         renderGrid =
           D.lwO 1
