@@ -6,7 +6,6 @@ import Data.List.NonEmpty (NonEmpty(..))
 import Hadoom.Editor.SectorBuilder
 import Linear
 import Linear.Affine
-import qualified Diagrams.Backend.Cairo as D
 import qualified Diagrams.Backend.Cairo.Internal as Cairo
 import qualified Diagrams.Prelude as D
 
@@ -24,50 +23,56 @@ renderVertex = D.lw D.none (D.square (1 / 5))
 
 renderEditor :: EditorState -> Diagram
 renderEditor EditorState{..} =
-  let P (V2 mouseX mouseY) = esMousePosition
-  in mconcat [D.fc D.white
-                   (D.translate (pointToR2 esMousePosition)
-                                renderVertex)
-             ,foldMap (D.lc D.white .
-                       D.lwO 2 .
-                       renderSector)
-                      (sbComplete esSectorBuilder)
-             ,foldMap (D.fc D.red . renderSector) esHoverSector
-             ,foldMap (D.fc D.white . renderSector) esSelectedSector
-             ,foldMap (\(initialPoint :| vertices) ->
-                         D.lwO 2
-                               (D.lc D.orange
-                                     (trailWithEdgeDirections
-                                        (D.mapLoc D.wrapLine
-                                                  (D.fromVertices
-                                                     (map pointToP2
-                                                          (initialPoint :
-                                                           reverse vertices))))) <>
-                                D.lc D.red
-                                     (trailWithEdgeDirections
-                                        (D.mapLoc D.wrapLine
-                                                  (D.fromVertices
-                                                     (map pointToP2
-                                                          (reverse (take 2
-                                                                         (reverse (initialPoint :
-                                                                                    reverse (P (V2 mouseX
-                                                                                                  mouseY) :
-                                                                                            vertices)))))))))))
-                      (sbInProgress esSectorBuilder)
-             ,D.dashingO [1,1] 0 (renderOrigin <> gridLines esHalfExtents)
-             ]
+  mconcat [renderMousePosition
+          ,renderCompleteSectors
+          ,renderHoverSector
+          ,renderSelectedSector
+          ,renderInProgressSector
+          ,renderGrid]
+  where renderMousePosition =
+          D.fc D.white
+               (D.translate (pointToR2 esMousePosition)
+                            renderVertex)
+        renderCompleteSectors =
+          foldMap (D.lc D.white .
+                   D.lwO 2 .
+                   renderSector)
+                  (sbComplete esSectorBuilder)
+        renderHoverSector =
+          foldMap (D.fc D.red . renderSector) esHoverSector
+        renderSelectedSector =
+          foldMap (D.fc D.white . renderSector) esSelectedSector
+        renderInProgressSector =
+          let lineWithNormals = trailWithEdgeDirections . D.mapLoc D.wrapLine .
+                                                          D.fromVertices .
+                                                          map pointToP2
+          in foldMap (\(initialPoint :| vertices) ->
+                        D.lwO 2
+                              (D.lc D.orange
+                                    (lineWithNormals
+                                       (initialPoint : reverse vertices)) <>
+                               D.lc D.red
+                                    (lineWithNormals
+                                       (reverse (take 2
+                                                      (reverse (initialPoint :
+                                                                reverse (esMousePosition :
+                                                                         vertices))))))))
+                     (sbInProgress esSectorBuilder)
+        renderGrid =
+          D.lwO 1
+                (D.dashingO [1,1]
+                            0
+                            (renderOrigin <> gridLines esHalfExtents))
 
 -- | Render a cross hair at the origin. This is used to indicate the origin
 -- point of map space.
 renderOrigin :: Diagram
 renderOrigin =
-  D.lwO 1
-        (D.lc D.yellow
-              (mconcat (take 4
-                             (iterate (D.rotateBy (1 / 4))
-                                      (D.strokeLocLine
-                                         (D.fromVertices
-                                            [D.origin,D.p2 (1 / 3,0)]))))))
+  D.lc D.yellow
+       (mconcat (take 4
+                      (iterate (D.rotateBy (1 / 4))
+                               (D.strokeLocLine
+                                  (D.fromVertices [D.origin,D.p2 (1 / 3,0)])))))
 
 renderSector :: NonEmpty (Point V2 Double) -> Diagram
 renderSector vertices =
@@ -104,9 +109,7 @@ gridLines (V2 gridHalfWidth gridHalfHeight) =
                  (gridLinesIn (negate gridHalfHeight)
                               gridHalfHeight))
   where gridLine =
-          D.centerX (D.lwO 1
-                           (D.strokeLine
-                              (D.lineFromVertices [D.p2 (0,0),D.p2 (1,0)])))
+          D.centerX (D.strokeLine (D.lineFromVertices [D.p2 (0,0),D.p2 (1,0)]))
         gridLinesIn x y =
           foldMap (\n ->
                      D.opacity (0.5 +
