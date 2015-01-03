@@ -14,11 +14,7 @@ registerDestroy widget =
   RB.fromAddHandler
     (RB.AddHandler
        (\h ->
-          fmap GTK.signalDisconnect
-               (GTK.on widget
-                       GTK.destroyEvent
-                       (False <$
-                        liftIO (h ())))))
+          fmap GTK.signalDisconnect (GTK.on widget GTK.objectDestroy (liftIO (h ())))))
 
 registerMotionNotify :: (RB.Frameworks t,GTK.WidgetClass w)
                      => w -> RB.Moment t (RB.Event t (Point V2 Double))
