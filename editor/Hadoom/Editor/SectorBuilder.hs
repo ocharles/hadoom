@@ -1,8 +1,9 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE RecordWildCards #-}
 module Hadoom.Editor.SectorBuilder where
 
-import BasePrelude
+import BasePrelude hiding (union)
 import Data.List.NonEmpty (NonEmpty(..))
 import Linear
 import Linear.Affine
@@ -29,15 +30,25 @@ data SectorBuilder =
 emptySectorBuilder :: SectorBuilder
 emptySectorBuilder = SectorBuilder Nothing []
 
+data SectorBuilderEvents t =
+  SectorBuilderEvents {evAddVertex :: Event t (Point V2 Double)
+                      ,evAbort :: Event t ()}
+
 -- | Build a reactive 'SectorBuilder'. Given an event containing the coordinates
 -- (in map-world space), this will progress the 'SectorBuilder', resulting in:
 --   * The beginning of a new sector
 --   * The progress of an in-progress sector
 --   * The completion of a new sector
-mkSectorBuilder :: Event t (Point V2 Double) -- ^ Mouse click events
+mkSectorBuilder :: SectorBuilderEvents t
               -> Behavior t SectorBuilder
-mkSectorBuilder = accumB emptySectorBuilder . fmap updateSectorBuilder
-  where updateSectorBuilder coords =
+mkSectorBuilder SectorBuilderEvents{..} =
+  accumB emptySectorBuilder unionedEvents
+  where unionedEvents =
+          (addVertex <$> evAddVertex) `union`
+          (abort <$ evAbort)
+        abort =
+          \sb -> sb {sbInProgress = Nothing}
+        addVertex coords =
           \sb ->
             case sbInProgress sb of
               Nothing ->

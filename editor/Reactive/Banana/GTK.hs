@@ -59,3 +59,14 @@ registerToolButtonClicked b =
           fmap GTK.signalDisconnect
                (GTK.onToolButtonClicked b
                                         (h ()))))
+
+registerKeyPressed w =
+  RB.fromAddHandler
+    (RB.AddHandler
+       (\h ->
+          fmap GTK.signalDisconnect
+               (GTK.on w
+                       GTK.keyReleaseEvent
+                       (do kv <- GTK.eventKeyVal
+                           True <$
+                             (liftIO (h kv)))))) -- TODO This should return False if we're not interested in the event

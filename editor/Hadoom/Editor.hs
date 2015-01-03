@@ -34,10 +34,13 @@ editorNetwork HadoomGUI{..} =
   do mainWindowClosed <- registerDestroy appWindow
      mouseMoved <- registerMotionNotify guiMap
      mouseClicked <- registerMouseClicked guiMap
+     guiKeyPressed <- registerKeyPressed guiMap
      let lmbClicked =
            RB.filterE (== GTK.LeftButton) mouseClicked
          rmbClicked =
            RB.filterE (== GTK.RightButton) mouseClicked
+         escapePressed =
+           void (RB.filterE (== 65307) guiKeyPressed)
          widgetSize =
            pure (outputSize :: V2 Double)
          gridCoords =
@@ -46,7 +49,9 @@ editorNetwork HadoomGUI{..} =
              (RB.filterJust
                 (toGridCoords <$> widgetSize <*> pure mapExtents <@> mouseMoved))
          sectorBuilder =
-           mkSectorBuilder (gridCoords <@ lmbClicked)
+           mkSectorBuilder
+             SectorBuilderEvents {evAddVertex = gridCoords <@ lmbClicked
+                                 ,evAbort = escapePressed}
          overSector =
            querySelected <$>
            (sbComplete <$> sectorBuilder) <*>
