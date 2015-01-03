@@ -54,8 +54,8 @@ renderEditor EditorState{..} =
                                                                                                   mouseY) :
                                                                                             vertices)))))))))))
                       (sbInProgress esSectorBuilder)
-             ,renderOrigin
-             ,gridLines esHalfExtents]
+             ,D.dashingO [1,1] 0 (renderOrigin <> gridLines esHalfExtents)
+             ]
 
 -- | Render a cross hair at the origin. This is used to indicate the origin
 -- point of map space.
@@ -67,7 +67,7 @@ renderOrigin =
                              (iterate (D.rotateBy (1 / 4))
                                       (D.strokeLocLine
                                          (D.fromVertices
-                                            [D.origin,D.p2 (1 / 2,0)]))))))
+                                            [D.origin,D.p2 (1 / 3,0)]))))))
 
 renderSector :: NonEmpty (Point V2 Double) -> Diagram
 renderSector vertices =
@@ -108,16 +108,13 @@ gridLines (V2 gridHalfWidth gridHalfHeight) =
                            (D.strokeLine
                               (D.lineFromVertices [D.p2 (0,0),D.p2 (1,0)])))
         gridLinesIn x y =
-          D.dashingO
-            [1,1]
-            0
-            (foldMap (\n ->
-                        D.opacity (0.5 +
-                                   0.5 *
-                                   (fromIntegral (round n `mod` 2 :: Int)))
-                                  (D.translate (D.r2 (0,n))
-                                               (D.scale len gridLine)))
-                     [x .. y])
+          foldMap (\n ->
+                     D.opacity (0.5 +
+                                0.5 *
+                                (fromIntegral (round n `mod` 2 :: Int)))
+                               (D.translate (D.r2 (0,n))
+                                            (D.scale len gridLine)))
+                  [x .. y]
           where len = y - x
 
 pointToP2 :: Point V2 Double -> D.P2
