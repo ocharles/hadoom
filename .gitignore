@@ -6,3 +6,4 @@ dist/
 *.ps
 *.prof
 .cabal-sandbox
+*.trace
