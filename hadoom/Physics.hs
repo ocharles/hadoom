@@ -2,10 +2,8 @@
 {-# LANGUAGE OverloadedLists #-}
 {-# LANGUAGE RecordWildCards #-}
 module Physics where
-
-import BasePrelude
+import BasePrelude hiding (loop)
 import Control.Lens hiding (indices)
-import Control.Monad (void)
 import Control.Monad.Fix (MonadFix)
 import Control.Wire hiding (loop)
 import Foreign.C (CFloat)

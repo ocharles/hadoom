@@ -1,4 +1,5 @@
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TypeFamilies #-}
 module Hadoom.Editor.Render where
 
 import BasePrelude
@@ -14,6 +15,7 @@ import qualified Diagrams.Prelude as D
 data EditorState =
   EditorState {esMousePosition :: Point V2 Double
               ,esSectorBuilder :: SectorBuilder
+              ,esSelectedSector :: Maybe Int
               ,esHalfExtents :: V2 Double}
 
 type Diagram = D.Diagram Cairo.Cairo D.R2
@@ -22,12 +24,19 @@ renderVertex :: Diagram
 renderVertex = D.lw D.none (D.square (1 / 5))
 
 -- TODO Rendering the sector builder should not care where the mouse is.
-renderSectorBuilder :: Point V2 Double -> SectorBuilder -> Diagram
-renderSectorBuilder mousePosition sb =
-  (case sbState sb of
-     AddSector vIds -> renderInProgress vIds
-     _ -> mempty) <>
-  renderComplete
+renderSectorBuilder :: Point V2 Double -> SectorBuilder -> Maybe IntMap.Key -> Diagram
+renderSectorBuilder mousePosition sb selectedSector =
+  case sbState sb of
+    AddSector vIds -> renderInProgress vIds <> renderComplete
+    _ ->
+      D.lwO 1
+            (IntMap.foldMapWithKey
+               (\sectorId sector ->
+                  D.lc (fromMaybe D.white
+                                  (D.orange <$
+                                   mfilter (== sectorId) selectedSector))
+                       (renderSector ((sbVertices sb IntMap.!) <$> sector)))
+               (sbSectors sb))
   where renderInProgress vIds =
           let lineWithNormals = trailWithEdgeDirections . D.mapLoc D.wrapLine .
                                                           D.fromVertices .
@@ -74,7 +83,7 @@ renderSectorBuilder mousePosition sb =
 renderEditor :: EditorState -> Diagram
 renderEditor EditorState{..} =
   mconcat [renderMousePosition
-          ,renderSectorBuilder esMousePosition esSectorBuilder
+          ,renderSectorBuilder esMousePosition esSectorBuilder esSelectedSector
           ,renderGrid]
   where renderMousePosition =
           D.fc D.white
@@ -96,15 +105,18 @@ renderOrigin =
                                (D.strokeLocLine
                                   (D.fromVertices [D.origin,D.p2 (1 / 3,0)])))))
 
+sectorToTrailLike :: (D.TrailLike t,D.V t ~ D.R2)
+                  => Polygon (Point V2 Double) -> t
+sectorToTrailLike =
+  D.fromVertices .
+  foldMap (\(P (V2 x y)) -> [D.p2 (x,y)])
+
 renderSector :: Polygon (Point V2 Double) -> Diagram
 renderSector vertices =
   let sectorPolygon :: D.Located (D.Trail D.R2)
       sectorPolygon =
-        D.mapLoc (D.wrapTrail . D.closeLine)
-                 (D.fromVertices
-                    (foldMap (\(P (V2 x y)) ->
-                                [D.p2 (x,y)])
-                             vertices))
+        D.mapLoc (D.wrapTrail . D.closeLine) (sectorToTrailLike vertices)
+
   in D.fc D.lightskyblue
           (D.decorateLocatedTrail sectorPolygon
                                   (repeat renderVertex)) <>
