@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE RecordWildCards #-}
@@ -13,9 +14,11 @@ import Linear.Affine
 import Reactive.Banana
 import qualified Data.IntMap.Strict as IntMap
 
+type VertexId = IntMap.Key
+
 data SectorBuilder =
   SectorBuilder {sbVertices :: IntMap (Point V2 Double)
-                ,sbSectors :: [Polygon IntMap.Key]
+                ,sbSectors :: IntMap (Polygon VertexId)
                 ,sbState :: State}
   deriving (Show)
 
@@ -70,8 +73,8 @@ addVertex coords snapshot sb =
           (v2:v3:vs') ->
             (Nothing
             ,sb {sbSectors =
-                   sbSectors sb ++
-                   [Polygon v1 v2 v3 vs']
+                   fst (insertMax (sbSectors sb)
+                                  (Polygon v1 v2 v3 vs'))
                 ,sbState = SelectSector Nothing})
           _ -> (Nothing,snapshot)
     _ ->
@@ -98,7 +101,7 @@ insertMax im a
 
 splitExistingLines :: SectorBuilder -> (IntMap.Key, Point V2 Double) -> SectorBuilder
 splitExistingLines sb (pId,p) =
-  sb {sbSectors = map splitPolygon (sbSectors sb)}
+  sb {sbSectors = fmap splitPolygon (sbSectors sb)}
   where splitPolygon s =
           let splitLine ls
                 | pointOnLine (fmap (sbVertices sb IntMap.!) ls)
@@ -109,9 +112,9 @@ splitExistingLines sb (pId,p) =
           in joinPolygon (splitLine <$> linesOfPolygon s)
 
 -- TODO Rewrite without relying on partiality (pattern match)
-joinPolygon :: Polygon (NonEmpty a) -> Polygon a
-joinPolygon (Polygon a b c d) =
-  let v1:v2:v3:vs = toList a <> toList b <> toList c <> concatMap toList d
+joinPolygon :: Foldable f => Polygon (f a) -> Polygon a
+joinPolygon (Polygon a b c ds) =
+  let v1:v2:v3:vs = toList a <> toList b <> toList c <> concatMap toList ds
   in Polygon v1 v2 v3 vs
 
 linesOfPolygon :: Polygon a -> Polygon (LineSegment a)

@@ -2,6 +2,7 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE MultiWayIf #-}
 module Hadoom.Geometry where
 
@@ -11,18 +12,16 @@ import Data.Ord (comparing)
 import Linear as L hiding (outer)
 import Linear.Affine
 import qualified Data.Vector as V
+import qualified Data.NonEmpty as NE
 
 data LineSegment a =
   LineSegment {start :: a
               ,end :: a}
   deriving (Eq,Ord,Read,Show,Functor)
 
-data Polygon a =
-  Polygon {polyV1 :: a
-          ,polyV2 :: a
-          ,polyV3 :: a
-          ,polyVS :: [a]}
-  deriving (Eq,Ord,Read,Show,Functor,Traversable,Foldable)
+-- A polygon is a list of at least three elements (as a polygon is an n-gon with n >= 3).
+type Polygon a = NE.T (NE.T (NE.T [])) a
+pattern Polygon a b c ds = a `NE.Cons` (b `NE.Cons` (c `NE.Cons` ds))
 
 -- | Given two line segments, find the point of intersection on the first line
 -- that intersects with the second line. If the lines do not cross or are
