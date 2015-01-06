@@ -1,3 +1,6 @@
+{-# LANGUAGE DeriveFoldable #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MultiWayIf #-}
 module Hadoom.Geometry where
@@ -10,15 +13,24 @@ import Linear.Affine
 import qualified Data.Vector as V
 
 data LineSegment a =
-  LineSegment {start :: Point V2 a
-              ,end :: Point V2 a}
-  deriving (Eq,Ord,Read,Show)
+  LineSegment {start :: a
+              ,end :: a}
+  deriving (Eq,Ord,Read,Show,Functor)
+
+data Polygon a =
+  Polygon {polyV1 :: a
+          ,polyV2 :: a
+          ,polyV3 :: a
+          ,polyVS :: [a]}
+  deriving (Eq,Ord,Read,Show,Functor,Traversable,Foldable)
 
 -- | Given two line segments, find the point of intersection on the first line
 -- that intersects with the second line. If the lines do not cross or are
 -- coincident, then 'Nothing' is returned.
 lineLineIntersection :: (Epsilon a,Fractional a,Ord a)
-                    => LineSegment a -> LineSegment a -> Maybe (Point V2 a)
+                     => LineSegment (Point V2 a)
+                     -> LineSegment (Point V2 a)
+                     -> Maybe (Point V2 a)
 lineLineIntersection (LineSegment p p') (LineSegment q q') =
   let r = p' .-. p
       s = q' .-. q
@@ -36,11 +48,23 @@ lineLineIntersection (LineSegment p p') (LineSegment q q') =
                  then Just (p .+^ r ^* t)
                  else Nothing
 
+-- | Determine if a point lies on a line segment
+-- Cribbed from https://stackoverflow.com/questions/328107/how-can-you-determine-a-point-is-between-two-other-points-on-a-line-segment
+pointOnLine :: (Epsilon a,Fractional a,Ord a)
+            => LineSegment (Point V2 a) -> Point V2 a -> Bool
+pointOnLine (LineSegment a@(P (V2 a1 a2)) b@(P (V2 b1 b2))) c@(P (V2 c1 c2)) =
+  if a `qd` c + b `qd` c <= a `qd` b -- Triangle inequality ftw
+     then nearZero (det22 (V2 (V2 (a1 - c1)
+                                  (b2 - c2))
+                              (V2 (b1 - c1)
+                                  (a2 - c2))))
+     else False
+
 -- | Determine which side of a line a point lies. If the point is on the line
 -- (or extremely close to being so, as defined by 'Epsilon'), then return that
 -- information.
 lineSide :: (Epsilon a,Ord a)
-         => LineSegment a -> Point V2 a -> LineSide
+         => LineSegment (Point V2 a) -> Point V2 a -> LineSide
 lineSide (LineSegment (P (V2 ax ay)) (P (V2 bx by))) (P (V2 x y)) =
   let p = (bx - ax) * (y - ay) - (by - ay) * (x - ax)
   in if | nearZero p -> OnLine
@@ -185,7 +209,8 @@ pointInTriangle p0@(P (V2 p0x p0y)) p1@(P (V2 p1x p1y)) p2@(P (V2 p2x p2y)) (P (
   in (s > 0 || nearZero s) && (t > 0 || nearZero t) && ((1 - s - t) > 0 || nearZero (1 - s - t))
 
 -- https://stackoverflow.com/questions/1073336/circle-line-segment-collision-detection-algorithm
-circleLineSegmentIntersection :: (Floating a, Ord a) => Circle a -> LineSegment a -> Bool
+circleLineSegmentIntersection :: (Floating a,Ord a)
+                              => Circle a -> LineSegment (Point V2 a) -> Bool
 circleLineSegmentIntersection (Circle x r) (LineSegment e l) =
   let d = l .-. e
       f = e .-. x

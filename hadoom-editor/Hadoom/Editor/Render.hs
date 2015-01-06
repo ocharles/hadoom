@@ -4,16 +4,16 @@ module Hadoom.Editor.Render where
 import BasePrelude
 import Data.List.NonEmpty (NonEmpty(..))
 import Hadoom.Editor.SectorBuilder
+import Hadoom.Geometry
 import Linear
 import Linear.Affine
+import qualified Data.IntMap.Strict as IntMap
 import qualified Diagrams.Backend.Cairo.Internal as Cairo
 import qualified Diagrams.Prelude as D
 
 data EditorState =
   EditorState {esMousePosition :: Point V2 Double
               ,esSectorBuilder :: SectorBuilder
-              ,esHoverSector :: Maybe (NonEmpty (Point V2 Double))
-              ,esSelectedSector :: Maybe (NonEmpty (Point V2 Double))
               ,esHalfExtents :: V2 Double}
 
 type Diagram = D.Diagram Cairo.Cairo D.R2
@@ -21,40 +21,24 @@ type Diagram = D.Diagram Cairo.Cairo D.R2
 renderVertex :: Diagram
 renderVertex = D.lw D.none (D.square (1 / 5))
 
-renderEditor :: EditorState -> Diagram
-renderEditor EditorState{..} =
-  mconcat [renderMousePosition
-          ,renderCompleteSectors
-          ,renderHoverSector
-          ,renderSelectedSector
-          ,renderInProgressSector
-          ,renderGrid]
-  where renderMousePosition =
-          D.fc D.white
-               (D.translate (pointToR2 esMousePosition)
-                            renderVertex)
-        renderCompleteSectors =
-          foldMap (D.lc D.white .
-                   D.lwO 2 .
-                   renderSector)
-                  (sbComplete esSectorBuilder)
-        renderHoverSector =
-          foldMap (D.fc D.red . renderSector) esHoverSector
-        renderSelectedSector =
-          foldMap (D.fc D.white . renderSector) esSelectedSector
-        renderInProgressSector =
+-- TODO Rendering the sector builder should not care where the mouse is.
+renderSectorBuilder :: Point V2 Double -> SectorBuilder -> Diagram
+renderSectorBuilder mousePosition =
+  either renderInProgress renderComplete .
+  sbState
+  where renderInProgress (AddSector (AddSectorState vIds state)) =
           let lineWithNormals = trailWithEdgeDirections . D.mapLoc D.wrapLine .
                                                           D.fromVertices .
                                                           map pointToP2
               renderSides (initialPoint :| vertices) =
-                D.lwO 2
+                D.lwO 1
                       (D.lc D.orange
                             (lineWithNormals (initialPoint : reverse vertices)) <>
                        D.lc D.red
                             (lineWithNormals
                                (reverse (take 2
                                               (reverse (initialPoint :
-                                                        reverse (esMousePosition :
+                                                        reverse (mousePosition :
                                                                  vertices)))))))
               renderLineLengths (initialPoint :| vertices) =
                 D.fontSizeO
@@ -75,11 +59,25 @@ renderEditor EditorState{..} =
                                               (D.fromVertices
                                                  (map pointToP2
                                                       (initialPoint :
-                                                       reverse (esMousePosition :
+                                                       reverse (mousePosition :
                                                                 vertices))))))))
-          in foldMap (\vertices -> renderLineLengths vertices <>
-                                    renderSides vertices)
-                     (sbInProgress esSectorBuilder)
+          in let vertices = (sVertices state IntMap.!) <$> vIds
+             in renderLineLengths vertices <> renderSides vertices <>
+                renderComplete state
+        renderComplete (State vertices sectors) =
+          D.lwO 1
+                (foldMap (D.lc D.white . renderSector)
+                         (fmap (fmap (vertices IntMap.!)) sectors))
+
+renderEditor :: EditorState -> Diagram
+renderEditor EditorState{..} =
+  mconcat [renderMousePosition
+          ,renderSectorBuilder esMousePosition esSectorBuilder
+          ,renderGrid]
+  where renderMousePosition =
+          D.fc D.white
+               (D.translate (pointToR2 esMousePosition)
+                            renderVertex)
         renderGrid =
           D.lwO 1
                 (D.dashingO [1,1]
@@ -96,7 +94,7 @@ renderOrigin =
                                (D.strokeLocLine
                                   (D.fromVertices [D.origin,D.p2 (1 / 3,0)])))))
 
-renderSector :: NonEmpty (Point V2 Double) -> Diagram
+renderSector :: Polygon (Point V2 Double) -> Diagram
 renderSector vertices =
   let sectorPolygon :: D.Located (D.Trail D.R2)
       sectorPolygon =

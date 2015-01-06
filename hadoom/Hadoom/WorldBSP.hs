@@ -15,12 +15,12 @@ import Linear.Affine
 
 data V :: SceneElementType -> * where
   VVertex :: Point V2 Float -> V TVertex
-  VLines :: [LineSegment Float] -> V a
+  VLines :: [LineSegment (Point V2 Float)] -> V a
 
 compileBSP :: PWorld TWorld -> BSP Float
 compileBSP = buildBSP . wallsOf
 
-wallsOf :: PWorld TWorld -> [LineSegment Float]
+wallsOf :: PWorld TWorld -> [LineSegment (Point V2 Float)]
 wallsOf (PWorld w) =
   case collectWalls w of
     VLines ls -> ls

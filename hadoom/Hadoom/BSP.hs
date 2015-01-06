@@ -5,13 +5,14 @@ module Hadoom.BSP (BSP(..), buildBSP, circleIntersects) where
 import BasePrelude hiding (left, lefts, right, rights, lines)
 import Hadoom.Geometry
 import Linear
+import Linear.Affine
 import Data.List.NonEmpty (NonEmpty(..))
 
 -- | A binary space partition tree, where each node contains 1 or more
 -- coincident line segments (along the separating line), and a smaller BSP tree
 -- of line segments to the left, and line segments to the right.
 data BSP a
-  = Split (NonEmpty (LineSegment a))
+  = Split (NonEmpty (LineSegment (Point V2 a)))
           (BSP a)
           (BSP a)
   | Empty
@@ -20,17 +21,17 @@ data BSP a
 -- | An internal structure to keep track of how a given line segment would
 -- partition other lines.
 data Split a =
-  MkSplit {lefts :: [LineSegment a]
-          ,rights :: [LineSegment a]
-          ,coincidents :: [LineSegment a]}
+  MkSplit {lefts :: [LineSegment (Point V2 a)]
+          ,rights :: [LineSegment (Point V2 a)]
+          ,coincidents :: [LineSegment (Point V2 a)]}
   deriving (Eq,Ord,Show)
 
-left, right, coincident :: LineSegment a -> Split a
+left, right, coincident :: LineSegment (Point V2 a) -> Split a
 left l = mempty { lefts = [l] }
 right l = mempty { rights = [l] }
 coincident l = mempty { coincidents = [l] }
 
-filterSplit :: (LineSegment a -> Bool) -> Split a -> Split a
+filterSplit :: (LineSegment (Point V2 a) -> Bool) -> Split a -> Split a
 filterSplit f (MkSplit x y z) =
   MkSplit (filter f x)
           (filter f y)
@@ -46,7 +47,7 @@ instance Monoid (Split a) where
 -- | Build a 'BSP' out of a 'LineSegment' soup. Currently the first line segment
 -- will be taken as the root split.
 buildBSP :: (Epsilon a,Floating a,Fractional a,Num a,Ord a,Show a)
-         => [LineSegment a] -> BSP a
+         => [LineSegment (Point V2 a)] -> BSP a
 buildBSP [] = Empty
 buildBSP (split:lines) =
   let splitLine l =

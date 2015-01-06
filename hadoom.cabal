@@ -17,7 +17,7 @@ Data-Files:
 Library
   hs-source-dirs: hadoom
   build-depends:
-                    JuicyPixels
+                  JuicyPixels
                 , base >=4.7 && <4.8
                 , base-prelude
                 , bytestring >= 0.10.4.0
@@ -33,7 +33,7 @@ Library
                 , netwire
                 , profunctors
                 , sdl2 >= 2.0.0 && < 2.1
-                , semigroups >= 0.16
+                , semigroups
                 , text >= 1.1.1.3 && < 1.3
                 , time
                 , transformers
@@ -85,7 +85,7 @@ executable hadoom
   ghc-options: -Wall -rtsopts -O2
 
 executable hadoom-editor
-  hs-source-dirs: editor
+  hs-source-dirs: hadoom-editor
   main-is: Main.hs
   build-depends:
 

@@ -17,7 +17,7 @@ main :: IO ()
 main =
   do _ <- GTK.initGUI
      builder <- GTK.builderNew
-     GTK.builderAddFromFile builder "editor/editor.glade"
+     GTK.builderAddFromFile builder "hadoom-editor/editor.glade"
      w <- GTK.builderGetObject builder GTK.castToWindow "appWindow"
      GTK.widgetShow w
      da <- GTK.builderGetObject builder GTK.castToDrawingArea "mapDrawingArea"

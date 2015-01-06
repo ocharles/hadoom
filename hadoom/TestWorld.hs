@@ -1,12 +1,12 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE DataKinds #-}
 module TestWorld where
-
 import BasePrelude
 import Data.TList
-import Linear
-import Material
 import Hadoom.World
+import Linear
+import Linear.Affine
+import Material
 
 testWorld :: PWorld TWorld
 testWorld =
@@ -23,17 +23,14 @@ testWorld =
                                                     (Just flat) :::
                               Hadoom.World.Material (Texture "DHTP/textures/bigdoor2.png" SRGB)
                                                     (Just flat) :::
-                              Vertex (V2 (-2)
-                                         (-2)) :::
-                              Vertex (V2 (-1.2)
-                                         (-2)) :::
-                              Vertex (V2 1.2 (-2)) :::
-                              Vertex (V2 2 (-2)) :::
-                              Vertex (V2 2 2) :::
-                              Vertex (V2 (-2) 2) :::
-                              Vertex (V2 1.2 (-40)) :::
-                              Vertex (V2 (-1.2)
-                                         (-40)) :::
+                              Vertex (P (V2 (-2) (-2))) :::
+                              Vertex (P (V2 (-1.2) (-2))) :::
+                              Vertex (P (V2 1.2 (-2))) :::
+                              Vertex (P (V2 2 (-2))) :::
+                              Vertex (P (V2 2 2)) :::
+                              Vertex (P (V2 (-2) 2)) :::
+                              Vertex (P (V2 1.2 (-40))) :::
+                              Vertex (P (V2 (-1.2) (-40))) :::
                               TNil)
                            (\(wt ::: ft ::: ct ::: lt ::: v1 ::: v2 ::: v3 ::: v4 ::: v5 ::: v6 ::: v7 ::: v8 ::: _) ->
                               letrec (\_ ->

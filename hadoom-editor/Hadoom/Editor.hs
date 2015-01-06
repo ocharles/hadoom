@@ -2,7 +2,6 @@
 module Hadoom.Editor where
 
 import BasePrelude
-import Data.List.NonEmpty (NonEmpty(..))
 import Hadoom.Editor.Render
 import Hadoom.Editor.SectorBuilder
 import Linear
@@ -15,7 +14,6 @@ import qualified Diagrams.Prelude as D
 import qualified Graphics.UI.Gtk as GTK
 import qualified Reactive.Banana as RB
 import qualified Reactive.Banana.Frameworks as RB
-import qualified Hadoom
 
 data HadoomGUI =
   HadoomGUI {appWindow :: GTK.Window
@@ -37,8 +35,6 @@ editorNetwork HadoomGUI{..} =
      guiKeyPressed <- registerKeyPressed guiMap
      let lmbClicked =
            RB.filterE (== GTK.LeftButton) mouseClicked
-         rmbClicked =
-           RB.filterE (== GTK.RightButton) mouseClicked
          escapePressed =
            void (RB.filterE (== 65307) guiKeyPressed)
          widgetSize =
@@ -52,17 +48,8 @@ editorNetwork HadoomGUI{..} =
            mkSectorBuilder
              SectorBuilderEvents {evAddVertex = gridCoords <@ lmbClicked
                                  ,evAbort = escapePressed}
-         overSector =
-           querySelected <$>
-           (sbComplete <$> sectorBuilder) <*>
-           pure mapExtents <*>
-           (toDiagramCoords <$> widgetSize <*> pure mapExtents <*>
-            RB.stepper 0 mouseMoved)
-         selectedSector =
-           RB.stepper Nothing
-                      (overSector <@ rmbClicked)
          editorState = EditorState <$> gridCoords <*> sectorBuilder <*>
-                       overSector <*> selectedSector <*> pure mapExtents
+                       pure mapExtents
          diagram = renderEditor <$> editorState
          shouldRedraw =
            foldl1 RB.union [void mouseMoved,void mouseClicked]
@@ -72,12 +59,6 @@ editorNetwork HadoomGUI{..} =
         diagramChanged)
      RB.reactimate (GTK.widgetQueueDraw guiMap <$ shouldRedraw)
      RB.reactimate (GTK.mainQuit <$ mainWindowClosed)
-     playHadoom <- registerToolButtonClicked playHadoomButton
-     RB.reactimate
-       (Hadoom.withGLWindow <$>
-        (Hadoom.hadoom <$>
-         (toWorld <$> sectorBuilder)) <@
-        playHadoom)
 
 gridIntersections :: V2 Double -> D.QDiagram Cairo.Cairo D.R2 [Point V2 Double]
 gridIntersections (V2 halfW halfH) =
@@ -106,20 +87,6 @@ toGridCoords (V2 w h) mapExtents (P (V2 x y)) =
   in case ps of
        (p:_) -> Just p
        _ -> Nothing
-
-querySelected :: [NonEmpty (Point V2 Double)]
-              -> V2 Double
-              -> Point V2 Double
-              -> Maybe (NonEmpty (Point V2 Double))
-querySelected sectors (V2 w h) (P (V2 x y)) =
-  let sectorPaths =
-        foldMap (\s ->
-                   D.value (First (Just s))
-                           (renderSector s))
-                sectors <>
-        D.value mempty (D.rect (2 * w) (2 * h))
-  in getFirst (D.runQuery (D.query sectorPaths)
-                          (D.p2 (x,y)))
 
 toDiagramCoords :: V2 Double -> V2 Double -> Point V2 Double -> Point V2 Double
 toDiagramCoords (V2 w h) (V2 gridHalfWidth gridHalfHeight) (P (V2 x y)) =
