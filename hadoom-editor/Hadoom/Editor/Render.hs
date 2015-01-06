@@ -23,10 +23,12 @@ renderVertex = D.lw D.none (D.square (1 / 5))
 
 -- TODO Rendering the sector builder should not care where the mouse is.
 renderSectorBuilder :: Point V2 Double -> SectorBuilder -> Diagram
-renderSectorBuilder mousePosition =
-  either renderInProgress renderComplete .
-  sbState
-  where renderInProgress (AddSector (AddSectorState vIds state)) =
+renderSectorBuilder mousePosition sb =
+  (case sbState sb of
+     AddSector vIds -> renderInProgress vIds
+     _ -> mempty) <>
+  renderComplete
+  where renderInProgress vIds =
           let lineWithNormals = trailWithEdgeDirections . D.mapLoc D.wrapLine .
                                                           D.fromVertices .
                                                           map pointToP2
@@ -61,13 +63,13 @@ renderSectorBuilder mousePosition =
                                                       (initialPoint :
                                                        reverse (mousePosition :
                                                                 vertices))))))))
-          in let vertices = (sVertices state IntMap.!) <$> vIds
-             in renderLineLengths vertices <> renderSides vertices <>
-                renderComplete state
-        renderComplete (State vertices sectors) =
+          in let vertices = (sbVertices sb IntMap.!) <$> vIds
+             in renderLineLengths vertices <> renderSides vertices
+        renderComplete =
           D.lwO 1
                 (foldMap (D.lc D.white . renderSector)
-                         (fmap (fmap (vertices IntMap.!)) sectors))
+                         (fmap (fmap (sbVertices sb IntMap.!))
+                               (sbSectors sb)))
 
 renderEditor :: EditorState -> Diagram
 renderEditor EditorState{..} =

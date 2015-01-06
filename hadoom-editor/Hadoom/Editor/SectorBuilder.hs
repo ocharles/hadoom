@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TupleSections #-}
@@ -12,25 +13,22 @@ import Linear.Affine
 import Reactive.Banana
 import qualified Data.IntMap.Strict as IntMap
 
-data State =
-  State {sVertices :: IntMap (Point V2 Double)
-        ,sSectors :: [Polygon IntMap.Key]}
-  deriving (Show)
-
 data SectorBuilder =
-  SectorBuilder {sbState :: Either Operation State}
+  SectorBuilder {sbVertices :: IntMap (Point V2 Double)
+                ,sbSectors :: [Polygon IntMap.Key]
+                ,sbState :: State}
   deriving (Show)
 
-data Operation = AddSector AddSectorState
-  deriving (Show)
-
-data AddSectorState =
-  AddSectorState {asVertices :: NonEmpty IntMap.Key
-                 ,asState :: State}
+data State
+  = AddSector (NonEmpty IntMap.Key)
+  | SelectSector (Maybe IntMap.Key)
   deriving (Show)
 
 emptySectorBuilder :: SectorBuilder
-emptySectorBuilder = SectorBuilder (Right (State mempty mempty))
+emptySectorBuilder =
+  SectorBuilder mempty
+                mempty
+                (SelectSector Nothing)
 
 data SectorBuilderEvents t =
   SectorBuilderEvents {evAddVertex :: Event t (Point V2 Double)
@@ -51,44 +49,45 @@ mkSectorBuilder SectorBuilderEvents{..} =
         stepper emptySectorBuilder (sectorBuilder <@ filterJust snapshot)
   in sectorBuilder
 
-data Snapshot = Snapshot
-  deriving (Eq, Show)
+data Snapshot =
+  Snapshot
+  deriving (Eq,Show)
 
-addVertex :: Point V2 Double -> SectorBuilder -> SectorBuilder -> (Maybe Snapshot, SectorBuilder)
-addVertex coords snapshot =
-  either expandCurrentPolygon beginNewPolygon .
-  sbState
-  where beginNewPolygon oldState =
-          let (sVertices',vId) =
-                insertMax (sVertices oldState) coords
-          in (Just Snapshot
-             ,SectorBuilder {sbState =
-                               Left (AddSector (AddSectorState
-                                                  (pure vId)
-                                                  (splitExistingLines
-                                                     (oldState {sVertices = sVertices'})
-                                                     (vId,coords))))})
-        expandCurrentPolygon (AddSector (AddSectorState (initialPoint :| ps) s))
-          | not (nearZero (coords .-.
-                           (sVertices s IntMap.! initialPoint))) =
-            let (sVertices',vId) =
-                  insertMax (sVertices s) coords
-            in (Nothing
-               ,SectorBuilder {sbState =
-                                 Left (AddSector (AddSectorState
-                                                    (initialPoint :| vId : ps)
-                                                    (splitExistingLines
-                                                       (s {sVertices = sVertices'})
-                                                       (vId,coords))))})
-          | otherwise =
-            case reverse ps of
-              (p2:p3:ps') ->
-                (Nothing
-                ,SectorBuilder {sbState =
-                                  Right (s {sSectors =
-                                              sSectors s ++
-                                              [Polygon initialPoint p2 p3 ps']})})
-              _ -> (Nothing,snapshot)
+equalPoints :: (Affine p,Epsilon (Diff p a),Num a)
+            => p a -> p a -> Bool
+equalPoints a b = nearZero (a .-. b)
+
+addVertex :: Point V2 Double
+          -> SectorBuilder
+          -> SectorBuilder
+          -> (Maybe Snapshot,SectorBuilder)
+addVertex coords snapshot sb =
+  case sbState sb of
+    AddSector (v1 :| vs)
+      | equalPoints coords
+                    (sbVertices sb IntMap.! v1) ->
+        case reverse vs of
+          (v2:v3:vs') ->
+            (Nothing
+            ,sb {sbSectors =
+                   sbSectors sb ++
+                   [Polygon v1 v2 v3 vs']
+                ,sbState = SelectSector Nothing})
+          _ -> (Nothing,snapshot)
+    _ ->
+      let (sVertices',vId) =
+            insertMax (sbVertices sb) coords
+          sb' =
+            splitExistingLines (sb {sbVertices = sVertices'})
+                               (vId,coords)
+      in case sbState sb of
+           AddSector (v1 :| vs) ->
+             (Nothing
+             ,sb' {sbState =
+                     AddSector (v1 :| vId : vs)})
+           _ ->
+             (Just Snapshot
+             ,sb' {sbState = AddSector (pure vId)})
 
 insertMax :: IntMap a -> a -> (IntMap a, IntMap.Key)
 insertMax im a
@@ -97,12 +96,15 @@ insertMax im a
     let k = succ (fst (IntMap.findMax im))
     in (IntMap.insert k a im,k)
 
-splitExistingLines :: State -> (IntMap.Key, Point V2 Double) -> State
-splitExistingLines (State vertices sectors) (pId, p) =
-  (State vertices (map splitPolygon sectors))
+splitExistingLines :: SectorBuilder -> (IntMap.Key, Point V2 Double) -> SectorBuilder
+splitExistingLines sb (pId,p) =
+  sb {sbSectors = map splitPolygon (sbSectors sb)}
   where splitPolygon s =
           let splitLine ls
-                | pointOnLine (fmap (vertices IntMap.!) ls) p = start ls :| [pId]
+                | pointOnLine (fmap (sbVertices sb IntMap.!) ls)
+                              p =
+                  start ls :|
+                  [pId]
                 | otherwise = start ls :| []
           in joinPolygon (splitLine <$> linesOfPolygon s)
 
