@@ -46,6 +46,21 @@ registerMouseClicked widget =
                              liftIO (h (MouseClick button
                                                    (P (V2 x y))))))))
 
+registerMouseReleased :: (RB.Frameworks t,GTK.WidgetClass w)
+                      => w -> RB.Moment t (RB.Event t MouseClick)
+registerMouseReleased widget =
+  RB.fromAddHandler
+    (RB.AddHandler
+       (\h ->
+          fmap GTK.signalDisconnect
+               (GTK.on widget
+                       GTK.buttonReleaseEvent
+                       (do button <- GTK.eventButton
+                           (x,y) <- GTK.eventCoordinates
+                           False <$
+                             liftIO (h (MouseClick button
+                                                   (P (V2 x y))))))))
+
 withEvent :: (GTK.GObjectClass obj,RB.MonadIO m)
           => (t -> IO (GTK.ConnectId obj))
           -> ((a -> m ()) -> t)

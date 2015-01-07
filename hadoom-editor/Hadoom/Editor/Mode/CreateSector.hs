@@ -1,4 +1,5 @@
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE ViewPatterns #-}
 module Hadoom.Editor.Mode.CreateSector (createSectorMode) where
 
@@ -28,51 +29,54 @@ createSectorMode :: Frameworks t
                  -> Point V2 Double -- ^ The coordinates of the first vertex
                  -> Moment t (Behavior t Diagram)
 createSectorMode gui@HadoomGUI{..} initialSectorBuilder firstVertex =
-  do mouseClicked <- filterE ((== GTK.LeftButton) . mcButton) <$>
-                     registerMouseClicked guiMap
-     mouseMoved <- registerMotionNotify guiMap
-     guiKeyPressed <- registerKeyPressed guiMap
-     let sectorBuilderChanged =
-           accumE initialState
-                  (addVertex <$>
-                   (filterJust
-                      (toGridCoords mapExtents <$>
-                       (toDiagramCoords <$> widgetSize <*>
-                        pure mapExtents <@>
-                        (mcCoordinates <$> mouseClicked)))))
-         widgetSize =
-           pure (V2 30 30 ^*
-                 50) -- TODO
-         (completeAbort,completeSuccess) =
-           split (filterJust (complete <$> sectorBuilderChanged))
-         escapePressed =
-           void (filterE (== 65307) guiKeyPressed)
-         abort = completeAbort `union` void escapePressed
-         gridCoords =
-           stepper 0
-                   (filterJust
-                      (toGridCoords mapExtents <$>
-                       (toDiagramCoords <$> widgetSize <*> pure mapExtents <@>
-                                                           mouseMoved)))
-         newSectorDiagram =
-           ((\(sb,vertices) gc ->
-               renderInProgress
-                 (case (sbVertices sb IntMap.!) <$> vertices of
-                    NE.Cons v1 vs ->
-                      NE.Cons v1 (vs |> gc))) <$>
-            stepper initialState sectorBuilderChanged <*>
-            gridCoords)
-         completeSectorsDiagram =
-           renderCompleteSectors <$>
-           stepper initialSectorBuilder (fst <$> sectorBuilderChanged)
-         diagram = mappend <$> newSectorDiagram <*> completeSectorsDiagram
-     switchToDefault <- execute ((\sb ->
-                                    FrameworksMoment
-                                      (trimB =<<
-                                       defaultMode gui sb)) <$>
-                                 completeSuccess `union`
-                                 (initialSectorBuilder <$ abort))
-     return (switchB diagram (once switchToDefault))
+  mdo let switch = once switchToDefault
+          active = stepper True (False <$ switch)
+      mouseClicked <- filterE ((== GTK.LeftButton) . mcButton) .
+                      whenE active <$>
+                      registerMouseClicked guiMap
+      mouseMoved <- whenE active <$> registerMotionNotify guiMap
+      guiKeyPressed <- whenE active <$> registerKeyPressed guiMap
+      let sectorBuilderChanged =
+            accumE initialState
+                   (addVertex <$>
+                    (filterJust
+                       (toGridCoords mapExtents <$>
+                        (toDiagramCoords <$> widgetSize <*>
+                         pure mapExtents <@>
+                         (mcCoordinates <$> mouseClicked)))))
+          widgetSize =
+            pure (V2 30 30 ^*
+                  50) -- TODO
+          (completeAbort,completeSuccess) =
+            split (filterJust (complete <$> sectorBuilderChanged))
+          escapePressed =
+            void (filterE (== 65307) guiKeyPressed)
+          abort = completeAbort `union` void escapePressed
+          gridCoords =
+            stepper 0
+                    (filterJust
+                       (toGridCoords mapExtents <$>
+                        (toDiagramCoords <$> widgetSize <*> pure mapExtents <@>
+                                                            mouseMoved)))
+          newSectorDiagram =
+            ((\(sb,vertices) gc ->
+                renderInProgress
+                  (case (sbVertices sb IntMap.!) <$> vertices of
+                     NE.Cons v1 vs ->
+                       NE.Cons v1 (vs |> gc))) <$>
+             stepper initialState sectorBuilderChanged <*>
+             gridCoords)
+          completeSectorsDiagram =
+            renderCompleteSectors <$>
+            stepper initialSectorBuilder (fst <$> sectorBuilderChanged)
+          diagram = mappend <$> newSectorDiagram <*> completeSectorsDiagram
+      switchToDefault <- execute ((\sb ->
+                                     FrameworksMoment
+                                       (trimB =<<
+                                        defaultMode gui sb)) <$>
+                                  completeSuccess `union`
+                                  (initialSectorBuilder <$ abort))
+      return (switchB diagram switch)
   where initialState =
           let (sbVertices',v1Id) =
                 insertMax (sbVertices initialSectorBuilder) firstVertex

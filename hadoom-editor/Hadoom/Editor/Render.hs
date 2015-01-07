@@ -2,7 +2,8 @@
 {-# LANGUAGE TypeFamilies #-}
 module Hadoom.Editor.Render
        (Diagram, renderCompleteSectors, renderMousePosition, renderGrid,
-        renderSector, trailWithEdgeDirections, pointToP2)
+        renderSector, trailWithEdgeDirections, pointToP2,
+        sectorToTrailLike, renderSectorsWithSelection)
        where
 
 import BasePrelude
@@ -102,3 +103,14 @@ pointToP2 (P (V2 x y)) = D.p2 (x,y)
 
 pointToR2 :: Point V2 Double -> D.R2
 pointToR2 (P (V2 x y)) = D.r2 (x,y)
+
+renderSectorsWithSelection :: SectorBuilder -> Maybe IntMap.Key -> Diagram
+renderSectorsWithSelection sectorBuilder overSector =
+  D.lwO 1
+        (IntMap.foldMapWithKey
+           (\sectorId sector ->
+              D.lc (fromMaybe D.white
+                              (D.orange <$
+                               mfilter (== sectorId) overSector))
+                   (renderSector ((sbVertices sectorBuilder IntMap.!) <$> sector)))
+           (sbSectors sectorBuilder))
