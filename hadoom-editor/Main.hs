@@ -12,6 +12,7 @@ import qualified Reactive.Banana as RB
 import qualified Reactive.Banana.Frameworks as RB
 
 import Hadoom.Editor
+import Hadoom.Editor.GUI
 
 main :: IO ()
 main =

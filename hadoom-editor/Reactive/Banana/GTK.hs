@@ -26,8 +26,13 @@ registerMotionNotify widget =
                      False <$
                        liftIO (h (P (V2 x y)))))
 
+data MouseClick =
+  MouseClick {mcButton :: GTK.MouseButton
+             ,mcCoordinates :: Point V2 Double}
+  deriving (Eq, Show)
+
 registerMouseClicked :: (RB.Frameworks t,GTK.WidgetClass w)
-                     => w -> RB.Moment t (RB.Event t GTK.MouseButton)
+                     => w -> RB.Moment t (RB.Event t MouseClick)
 registerMouseClicked widget =
   RB.fromAddHandler
     (RB.AddHandler
@@ -36,8 +41,10 @@ registerMouseClicked widget =
                (GTK.on widget
                        GTK.buttonPressEvent
                        (do button <- GTK.eventButton
+                           (x,y) <- GTK.eventCoordinates
                            False <$
-                             liftIO (h button)))))
+                             liftIO (h (MouseClick button
+                                                   (P (V2 x y))))))))
 
 withEvent :: (GTK.GObjectClass obj,RB.MonadIO m)
           => (t -> IO (GTK.ConnectId obj))

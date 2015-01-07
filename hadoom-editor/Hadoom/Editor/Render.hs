@@ -1,9 +1,11 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeFamilies #-}
-module Hadoom.Editor.Render where
+module Hadoom.Editor.Render
+       (Diagram, renderCompleteSectors, renderMousePosition, renderGrid,
+        renderSector, trailWithEdgeDirections, pointToP2)
+       where
 
 import BasePrelude
-import Data.List.NonEmpty (NonEmpty(..))
 import Hadoom.Editor.SectorBuilder
 import Hadoom.Geometry
 import Linear
@@ -12,88 +14,29 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Diagrams.Backend.Cairo.Internal as Cairo
 import qualified Diagrams.Prelude as D
 
-data EditorState =
-  EditorState {esMousePosition :: Point V2 Double
-              ,esSectorBuilder :: SectorBuilder
-              ,esSelectedSector :: Maybe Int
-              ,esHalfExtents :: V2 Double}
-
 type Diagram = D.Diagram Cairo.Cairo D.R2
 
 renderVertex :: Diagram
 renderVertex = D.lw D.none (D.square (1 / 5))
 
--- TODO Rendering the sector builder should not care where the mouse is.
-renderSectorBuilder :: Point V2 Double -> SectorBuilder -> Maybe IntMap.Key -> Diagram
-renderSectorBuilder mousePosition sb selectedSector =
-  case sbState sb of
-    AddSector vIds -> renderInProgress vIds <> renderComplete
-    _ ->
-      D.lwO 1
-            (IntMap.foldMapWithKey
-               (\sectorId sector ->
-                  D.lc (fromMaybe D.white
-                                  (D.orange <$
-                                   mfilter (== sectorId) selectedSector))
-                       (renderSector ((sbVertices sb IntMap.!) <$> sector)))
-               (sbSectors sb))
-  where renderInProgress vIds =
-          let lineWithNormals = trailWithEdgeDirections . D.mapLoc D.wrapLine .
-                                                          D.fromVertices .
-                                                          map pointToP2
-              renderSides (initialPoint :| vertices) =
-                D.lwO 1
-                      (D.lc D.orange
-                            (lineWithNormals (initialPoint : reverse vertices)) <>
-                       D.lc D.red
-                            (lineWithNormals
-                               (reverse (take 2
-                                              (reverse (initialPoint :
-                                                        reverse (mousePosition :
-                                                                 vertices)))))))
-              renderLineLengths (initialPoint :| vertices) =
-                D.fontSizeO
-                  10
-                  (D.fc D.orange
-                        (foldMap (\wall ->
-                                    D.moveTo ((wall :: D.Located (D.Trail D.R2)) `D.atParam`
-                                              0.3)
-                                             ((case D.explodeTrail wall :: [[D.P2]] of
-                                                 [[p1,p2]] ->
-                                                   D.text (show (round (D.magnitude
-                                                                          (p1 D..-.
-                                                                           p2)) :: Int))
-                                                 _ -> mempty) <>
-                                              D.fc D.black (D.circle (2 / 5))))
-                                 (D.explodeTrail
-                                    (D.mapLoc D.wrapLine
-                                              (D.fromVertices
-                                                 (map pointToP2
-                                                      (initialPoint :
-                                                       reverse (mousePosition :
-                                                                vertices))))))))
-          in let vertices = (sbVertices sb IntMap.!) <$> vIds
-             in renderLineLengths vertices <> renderSides vertices
-        renderComplete =
-          D.lwO 1
-                (foldMap (D.lc D.white . renderSector)
-                         (fmap (fmap (sbVertices sb IntMap.!))
-                               (sbSectors sb)))
+renderCompleteSectors :: SectorBuilder -> Diagram
+renderCompleteSectors sectorBuilder =
+  foldMap renderSector
+          (fmap (fmap (sbVertices sectorBuilder IntMap.!))
+                (sbSectors sectorBuilder))
 
-renderEditor :: EditorState -> Diagram
-renderEditor EditorState{..} =
-  mconcat [renderMousePosition
-          ,renderSectorBuilder esMousePosition esSectorBuilder esSelectedSector
-          ,renderGrid]
-  where renderMousePosition =
-          D.fc D.white
-               (D.translate (pointToR2 esMousePosition)
-                            renderVertex)
-        renderGrid =
-          D.lwO 1
-                (D.dashingO [1,1]
-                            0
-                            (renderOrigin <> gridLines esHalfExtents))
+renderMousePosition :: Point V2 Double -> Diagram
+renderMousePosition mousePosition =
+  D.fc D.white
+       (D.translate (pointToR2 mousePosition)
+                    renderVertex)
+
+renderGrid :: V2 Double -> Diagram
+renderGrid halfExtents =
+  D.lwO 1
+        (D.dashingO [1,1]
+                    0
+                    (renderOrigin <> gridLines halfExtents))
 
 -- | Render a cross hair at the origin. This is used to indicate the origin
 -- point of map space.
