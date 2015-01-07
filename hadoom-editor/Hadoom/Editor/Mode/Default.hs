@@ -97,7 +97,7 @@ findSelectable sectorBuilder (P (V2 x y)) =
           (\vertexId coords ->
              D.value (First (Just (SelectVertex vertexId)))
                      (D.moveTo (pointToP2 coords)
-                               (D.circle 0.5)))
+                               (D.circle 0.3)))
           (sbVertices sectorBuilder)
   in getFirst (D.runQuery (D.query (sectorPaths <> vertices :: D.QDiagram Cairo.Cairo D.R2 (First Selectable)))
                           (D.p2 (x,y)))
