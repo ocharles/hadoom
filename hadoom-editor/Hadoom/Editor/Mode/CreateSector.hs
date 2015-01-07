@@ -66,7 +66,7 @@ createSectorMode gui@HadoomGUI{..} initialSectorBuilder firstVertex =
              gridCoords)
           completeSectorsDiagram =
             renderCompleteSectors <$>
-            stepper initialSectorBuilder (fst <$> sectorBuilderChanged)
+            stepper (fst initialState) (fst <$> sectorBuilderChanged)
           diagram = mappend <$> newSectorDiagram <*> completeSectorsDiagram
       switchToDefault <- execute ((\sb ->
                                      FrameworksMoment
@@ -114,17 +114,15 @@ renderInProgress _ = mempty
 complete :: (SectorBuilder,NE.T Seq.Seq Int) -> Maybe (Either () SectorBuilder)
 complete (sb,NE.Cons v1 vs) =
   case Seq.viewr vs of
-    _ :> vn
+    vs' :> vn
       | equalPoints (lookupVertex v1)
                     (lookupVertex vn) ->
-        Just (if Seq.length vs > 2
+        Just (if Seq.length vs' >= 2
                  then Right (sb {sbSectors =
                                    fst (insertMax (sbSectors sb)
-                                                  (case Seq.viewr vs of
-                                                     vs' :> _ ->
-                                                       case toList vs' of
-                                                         v2:v3:vs'' ->
-                                                           Polygon v1 v2 v3 vs''))})
+                                                  (case toList vs' of
+                                                     v2:v3:vs'' ->
+                                                       Polygon v1 v2 v3 vs''))})
                  else Left ())
     _ -> Nothing
   where lookupVertex = (sbVertices sb IntMap.!)
@@ -133,12 +131,18 @@ addVertex :: Point V2 Double
           -> (SectorBuilder,NE.T Seq.Seq Int)
           -> (SectorBuilder,NE.T Seq.Seq Int)
 addVertex coords (sectorBuilder,NE.Cons v1 vs) =
-  let (sbVertices',vId) =
-        insertMax (sbVertices sectorBuilder) coords
-      sb =
-        splitExistingLines (sectorBuilder {sbVertices = sbVertices'})
-                           (vId,coords)
-  in (sb,NE.Cons v1 (vs |> vId))
+  case IntMap.minViewWithKey
+         (IntMap.filter (qdA coords >>> (< 1))
+                        (sbVertices sectorBuilder)) of
+    Just ((vId,_),_) ->
+      (sectorBuilder,NE.Cons v1 (vs |> vId))
+    Nothing ->
+      let (sbVertices',vId) =
+            insertMax (sbVertices sectorBuilder) coords
+          sb =
+            splitExistingLines (sectorBuilder {sbVertices = sbVertices'})
+                               (vId,coords)
+      in (sb,NE.Cons v1 (vs |> vId))
 
 splitExistingLines :: SectorBuilder
                    -> (IntMap.Key,Point V2 Double)
