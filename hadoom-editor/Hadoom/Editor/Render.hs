@@ -2,7 +2,7 @@
 {-# LANGUAGE TypeFamilies #-}
 module Hadoom.Editor.Render
        (Diagram, renderCompleteSectors, renderMousePosition, renderGrid,
-        renderSector, trailWithEdgeDirections, pointToP2,
+        renderSector, trailWithEdgeDirections, pointToP2, pointToR2,
         sectorToTrailLike, renderSectorsWithSelection)
        where
 
@@ -34,10 +34,9 @@ renderMousePosition mousePosition =
 
 renderGrid :: V2 Double -> Diagram
 renderGrid halfExtents =
-  D.lwO 1
-        (D.dashingO [1,1]
-                    0
-                    (renderOrigin <> gridLines halfExtents))
+  D.dashingO [1,1]
+             0
+             (renderOrigin <> gridLines halfExtents)
 
 -- | Render a cross hair at the origin. This is used to indicate the origin
 -- point of map space.
@@ -106,11 +105,10 @@ pointToR2 (P (V2 x y)) = D.r2 (x,y)
 
 renderSectorsWithSelection :: SectorBuilder -> Maybe IntMap.Key -> Diagram
 renderSectorsWithSelection sectorBuilder overSector =
-  D.lwO 1
-        (IntMap.foldMapWithKey
-           (\sectorId sector ->
-              D.lc (fromMaybe D.white
-                              (D.orange <$
-                               mfilter (== sectorId) overSector))
-                   (renderSector ((sbVertices sectorBuilder IntMap.!) <$> sector)))
-           (sbSectors sectorBuilder))
+  IntMap.foldMapWithKey
+    (\sectorId sector ->
+       (fromMaybe id
+                  (D.lc D.orange <$
+                   mfilter (== sectorId) overSector))
+         (renderSector ((sbVertices sectorBuilder IntMap.!) <$> sector)))
+    (sbSectors sectorBuilder)

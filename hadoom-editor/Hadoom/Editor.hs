@@ -8,6 +8,7 @@ import Hadoom.Editor.Render
 import Hadoom.Editor.SectorBuilder
 import Linear
 import Reactive.Banana.GTK
+import qualified Diagrams.Prelude as D
 import qualified Graphics.UI.Gtk as GTK
 import qualified Reactive.Banana as RB
 import qualified Reactive.Banana.Frameworks as RB
@@ -22,8 +23,10 @@ editorNetwork gui@HadoomGUI{..} =
   do mainWindowClosed <- registerDestroy appWindow
      RB.reactimate (GTK.mainQuit <$ mainWindowClosed)
      diagram <- do d <- defaultMode gui emptySectorBuilder
-                   return (mappend <$> d <*>
-                           (renderGrid <$> pure mapExtents))
+                   return (D.lc D.white .
+                           D.lwO 1 <$>
+                           (mappend <$> d <*>
+                            (renderGrid <$> pure mapExtents)))
      do diagramChanged <- RB.changes diagram
         RB.reactimate'
           (fmap (\d ->

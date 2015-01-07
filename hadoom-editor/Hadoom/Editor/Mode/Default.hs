@@ -6,6 +6,7 @@ import BasePrelude hiding (union)
 import Hadoom.Editor.GUI
 import Hadoom.Editor.Mode.CreateSector
 import Hadoom.Editor.Mode.MoveSector
+import Hadoom.Editor.Mode.MoveVertex
 import Hadoom.Editor.Render
 import Hadoom.Editor.SectorBuilder
 import Hadoom.Editor.Util
@@ -23,7 +24,7 @@ import qualified Graphics.UI.Gtk as GTK
 defaultMode :: Frameworks t => HadoomGUI -> SectorBuilder -> Moment t (Behavior t Diagram)
 defaultMode gui@HadoomGUI{..} sectorBuilder =
   mdo let switch =
-            once (switchToCreateSector `union` switchToMoveSector)
+            once (switchToCreateSector `union` switchToMove)
           active = stepper True (False <$ switch)
       mouseMoved <- whenE active <$> registerMotionNotify guiMap
       mouseClicked <- whenE active <$> registerMouseClicked guiMap
@@ -39,13 +40,14 @@ defaultMode gui@HadoomGUI{..} sectorBuilder =
                     (toGridCoords <$>
                      (toDiagramCoords <$> widgetSize <*> pure mapExtents <@>
                                                          mouseMoved))
-          overSector =
-            findSectorKey sectorBuilder <$>
+          hovering =
+            findSelectable sectorBuilder <$>
             (stepper 0
                      (toDiagramCoords <$> widgetSize <*> pure mapExtents <@>
                                                          mouseMoved))
-          completeSectors = renderSectorsWithSelection sectorBuilder <$>
-                            overSector
+          completeSectors =
+            renderSectorsWithSelection sectorBuilder <$>
+            pure Nothing -- TODO
           diagram =
             mappend <$>
             (renderMousePosition <$> gridCoords) <*>
@@ -55,26 +57,34 @@ defaultMode gui@HadoomGUI{..} sectorBuilder =
                                             (trimB =<<
                                              (createSectorMode gui sectorBuilder m))) <$>
                                        (gridCoords <@ lmbClicked))
-      switchToMoveSector <- execute ((\(sectorId,origin) ->
-                                        FrameworksMoment
-                                          (trimB =<<
-                                           moveSectorMode gui sectorBuilder sectorId origin)) <$>
-                                     filterJust
-                                       (((\s coords ->
-                                            fmap (\s' ->
-                                                    (s',coords))
-                                                 s) <$>
-                                         overSector <@>
-                                         (mcCoordinates <$> rmbClicked))))
+      switchToMove <- execute ((\(selection,origin) ->
+                                  FrameworksMoment
+                                    (trimB =<<
+                                     case selection of
+                                       SelectSector sectorId ->
+                                         moveSectorMode gui sectorBuilder sectorId origin
+                                       SelectVertex vertexId ->
+                                         moveVertexMode gui sectorBuilder vertexId origin)) <$>
+                               filterJust
+                                 (((\s coords ->
+                                      fmap (\s' ->
+                                              (s',coords))
+                                           s) <$>
+                                   hovering <@>
+                                   (mcCoordinates <$> rmbClicked))))
       return (switchB diagram switch)
 
-findSectorKey :: SectorBuilder -> Point V2 Double -> Maybe IntMap.Key
-findSectorKey sectorBuilder (P (V2 x y)) =
-  let sectorPaths :: D.QDiagram Cairo.Cairo D.R2 (First IntMap.Key)
-      sectorPaths =
+data Selectable
+  = SelectSector IntMap.Key
+  | SelectVertex IntMap.Key
+  deriving (Eq,Ord,Read,Show)
+
+findSelectable :: SectorBuilder -> Point V2 Double -> Maybe Selectable
+findSelectable sectorBuilder (P (V2 x y)) =
+  let sectorPaths =
         IntMap.foldMapWithKey
           (\sectorId sector ->
-             D.value (First (Just sectorId))
+             D.value (First (Just (SelectSector sectorId)))
                      (D.strokeLocTrail
                         (D.offsetTrail
                            0.5
@@ -82,5 +92,12 @@ findSectorKey sectorBuilder (P (V2 x y)) =
                                      (sectorToTrailLike
                                         (fmap (sbVertices sectorBuilder IntMap.!) sector))))))
           (sbSectors sectorBuilder)
-  in getFirst (D.runQuery (D.query (sectorPaths))
+      vertices =
+        IntMap.foldMapWithKey
+          (\vertexId coords ->
+             D.value (First (Just (SelectVertex vertexId)))
+                     (D.moveTo (pointToP2 coords)
+                               (D.circle 0.5)))
+          (sbVertices sectorBuilder)
+  in getFirst (D.runQuery (D.query (sectorPaths <> vertices :: D.QDiagram Cairo.Cairo D.R2 (First Selectable)))
                           (D.p2 (x,y)))

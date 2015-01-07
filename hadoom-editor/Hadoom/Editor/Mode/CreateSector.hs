@@ -87,9 +87,8 @@ renderInProgress vertices@(NE.viewR -> ((Seq.viewr -> vs :> vm),vn)) =
   let lineWithNormals = trailWithEdgeDirections . D.mapLoc D.wrapLine .
                                                   D.fromVertices . map pointToP2
       renderSides =
-        D.lwO 1
-              (D.lc D.orange (lineWithNormals [vm,vn]) <>
-               D.lc D.red (lineWithNormals (toList (vs :> vm))))
+        D.lc D.orange (lineWithNormals [vm,vn]) <>
+        D.lc D.red (lineWithNormals (toList (vs :> vm)))
       renderLineLengths =
         D.fontSizeO
           10
@@ -102,7 +101,7 @@ renderInProgress vertices@(NE.viewR -> ((Seq.viewr -> vs :> vm),vn)) =
                                            D.text (show (round (D.magnitude
                                                                   (p1 D..-. p2)) :: Int))
                                          _ -> mempty) <>
-                                      D.fc D.black (D.circle (2 / 5))))
+                                      D.lw D.none (D.fc D.black (D.circle (2 / 5)))))
                          (D.explodeTrail
                             (D.mapLoc D.wrapLine (D.fromVertices (map pointToP2 (toList vertices)))))))
   in renderLineLengths <> renderSides
@@ -121,9 +120,11 @@ complete (sb,NE.Cons v1 vs) =
         Just (if Seq.length vs > 2
                  then Right (sb {sbSectors =
                                    fst (insertMax (sbSectors sb)
-                                                  (case toList vs of
-                                                     v2:v3:vs' ->
-                                                       Polygon v1 v2 v3 vs'))})
+                                                  (case Seq.viewr vs of
+                                                     vs' :> _ ->
+                                                       case toList vs' of
+                                                         v2:v3:vs'' ->
+                                                           Polygon v1 v2 v3 vs''))})
                  else Left ())
     _ -> Nothing
   where lookupVertex = (sbVertices sb IntMap.!)
