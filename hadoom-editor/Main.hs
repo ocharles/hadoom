@@ -22,12 +22,6 @@ main =
      w <- GTK.builderGetObject builder GTK.castToWindow "appWindow"
      GTK.widgetShow w
      da <- GTK.builderGetObject builder GTK.castToDrawingArea "mapDrawingArea"
-     GTK.widgetAddEvents
-       da
-       [GTK.PointerMotionMask
-       ,GTK.PointerMotionHintMask
-       ,GTK.ButtonMotionMask
-       ,GTK.ButtonPressMask]
      GTK.widgetSetSizeRequest da
                               (outputSize ^. _x)
                               (outputSize ^. _y)

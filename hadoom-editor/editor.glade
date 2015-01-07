@@ -223,6 +223,7 @@
                         <property name="is_focus">True</property>
                         <property name="can_default">True</property>
                         <property name="has_default">True</property>
+                        <property name="events">GDK_POINTER_MOTION_MASK | GDK_POINTER_MOTION_HINT_MASK | GDK_BUTTON_MOTION_MASK | GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK | GDK_STRUCTURE_MASK</property>
                       </object>
                     </child>
                   </object>
