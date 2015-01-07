@@ -36,10 +36,9 @@ defaultMode gui@HadoomGUI{..} sectorBuilder =
             filterE ((== GTK.RightButton) . mcButton) mouseClicked
           gridCoords =
             stepper 0
-                    (filterJust
-                       (toGridCoords mapExtents <$>
-                        (toDiagramCoords <$> widgetSize <*> pure mapExtents <@>
-                                                            mouseMoved)))
+                    (toGridCoords <$>
+                     (toDiagramCoords <$> widgetSize <*> pure mapExtents <@>
+                                                         mouseMoved))
           overSector =
             findSectorKey sectorBuilder <$>
             (stepper 0

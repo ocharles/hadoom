@@ -39,11 +39,10 @@ createSectorMode gui@HadoomGUI{..} initialSectorBuilder firstVertex =
       let sectorBuilderChanged =
             accumE initialState
                    (addVertex <$>
-                    (filterJust
-                       (toGridCoords mapExtents <$>
-                        (toDiagramCoords <$> widgetSize <*>
-                         pure mapExtents <@>
-                         (mcCoordinates <$> mouseClicked)))))
+                    (toGridCoords <$>
+                     (toDiagramCoords <$> widgetSize <*>
+                      pure mapExtents <@>
+                      (mcCoordinates <$> mouseClicked))))
           widgetSize =
             pure (V2 30 30 ^*
                   50) -- TODO
@@ -54,10 +53,9 @@ createSectorMode gui@HadoomGUI{..} initialSectorBuilder firstVertex =
           abort = completeAbort `union` void escapePressed
           gridCoords =
             stepper 0
-                    (filterJust
-                       (toGridCoords mapExtents <$>
-                        (toDiagramCoords <$> widgetSize <*> pure mapExtents <@>
-                                                            mouseMoved)))
+                    (toGridCoords <$>
+                     (toDiagramCoords <$> widgetSize <*> pure mapExtents <@>
+                                                         mouseMoved))
           newSectorDiagram =
             ((\(sb,vertices) gc ->
                 renderInProgress

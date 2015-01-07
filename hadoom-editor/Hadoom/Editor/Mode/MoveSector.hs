@@ -33,18 +33,17 @@ moveSectorMode gui@HadoomGUI{..} initialSectorBuilder sectorId dragOrigin =
             pure (V2 30 30 ^*
                   50) -- TODO
           originGrid =
-            toGridCoords mapExtents <$>
+            toGridCoords <$>
             (toDiagramCoords <$> widgetSize <*> pure mapExtents <*>
              pure dragOrigin)
           sectorBuilder =
             stepper initialSectorBuilder
                     (moveSector sectorId initialSectorBuilder <$>
                      (flip (.-.) <$>
-                      (fromJust <$> originGrid) <@>
-                      (filterJust
-                         (toGridCoords mapExtents <$>
-                          (toDiagramCoords <$> widgetSize <*> pure mapExtents <@>
-                                                              mouseMoved)))))
+                      originGrid <@>
+                      (toGridCoords <$>
+                       (toDiagramCoords <$> widgetSize <*> pure mapExtents <@>
+                                                           mouseMoved))))
       switchToDefault <- execute ((\sb ->
                                      FrameworksMoment
                                        (trimB =<<
